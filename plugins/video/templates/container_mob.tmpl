@@ -21,6 +21,18 @@ function toggle(source) {
 -->
 </script>
 <p id="title"><a id="titleA" href="/">pyTiVo</a></p>
+<div id="pushmenu">
+<p id="title">
+ <input type="hidden" name="Command" value="Push"/>
+ <input type="hidden" name="Container" value="$name"/>
+   <select name="tsn">
+   #for $tivo in $tivo_names
+   <option>$tivo_names[$tivo]</option>
+   #end for
+   </select>
+  <input value="Send to TiVo" type="submit"/>
+</p>
+</div>
 <table id="main">
     #set $parent = ''
     #set $folders = $name.split("/")
@@ -73,16 +85,6 @@ function toggle(source) {
 	  </tr>
   #end for
 </table>
-    <div id="pushmenu">
-      <input type="hidden" name="Command" value="Push"/>
-      <input type="hidden" name="Container" value="$name"/>
-        <select name="tsn">
-        #for $tivo in $tivo_names
-        <option>$tivo_names[$tivo]</option>
-        #end for
-        </select>
-      <input value="Send to TiVo" type="submit"/>
-    </div>
 </form>
 </body>
 </html>

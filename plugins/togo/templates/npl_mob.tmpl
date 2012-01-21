@@ -62,8 +62,8 @@ function toggle(source) {
 	  #if $row['ContentType'] == 'x-tivo-container/folder'
 	    ## This is a folder
 		<td id="ColA"><a href='/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;Folder=$(row["UniqueId"])&amp;TiVo=$tivoIP'>$row['Title'] </a></td>
-		<td id="ColB"><div id="count">$(row["TotalItems"])</div></td>
-		<td id="ColC"><img src="/iPhoneArrow.png" alt=""></td>
+		<td id="ColB"><a href='/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;Folder=$(row["UniqueId"])&amp;TiVo=$tivoIP'><div id="count">$(row["TotalItems"])</div></a></td>
+		<td id="ColC"><a href='/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;Folder=$(row["UniqueId"])&amp;TiVo=$tivoIP'><img src="/iPhoneArrow.png" alt=""></a></td>
 		#else
 	    ## This is a show
 		
