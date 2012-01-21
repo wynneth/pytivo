@@ -34,6 +34,7 @@ PUSHED = '<h3>Queued for Push to %s</h3> <p>%s</p>'
 def tmpl(name):
     return file(os.path.join(SCRIPTDIR, 'templates', name), 'rb').read()
 
+HTML_CONTAINER_TEMPLATE_MOBILE = tmpl('container_mob.tmpl')
 HTML_CONTAINER_TEMPLATE = tmpl('container_html.tmpl')
 XML_CONTAINER_TEMPLATE = tmpl('container_xml.tmpl')
 TVBUS_TEMPLATE = tmpl('TvBus.tmpl')
@@ -293,6 +294,7 @@ class Video(Plugin):
         tsn = handler.headers.getheader('tsn', '')
         subcname = query['Container'][0]
         cname = subcname.split('/')[0]
+        useragent = handler.headers.getheader('User-Agent', '')
 
         if (not cname in handler.server.containers or
             not self.get_local_path(handler, query)):
@@ -350,8 +352,11 @@ class Video(Plugin):
 
             videos.append(video)
 
+        logger.debug('mobileagent: %d useragent: %s' % (useragent.lower().find('mobile'), useragent.lower()))
         if not use_html:
             t = Template(XML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
+        elif useragent.lower().find('mobile') > 0:
+            t = Template(HTML_CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
         else:
             t = Template(HTML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
         t.container = cname
