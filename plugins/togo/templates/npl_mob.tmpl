@@ -2,12 +2,13 @@
 "http://www.w3.org/TR/html4/strict.dtd">
 <html>
 <head>
-<title>pyTiVo - $escape($tname)</title>
+<title>pyTivo - ToGo - $escape($tname)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0"/>
 <link rel="stylesheet" type="text/css" href="/main_mob.css">
 </head>
 <body>
 <form action="/TiVoConnect" method="POST">
+<p id="title"><a id="titleA" href="/">pyTivo - ToGo - </a></p>
 <script language="JavaScript">
 <!--
 function toggle(source) {
@@ -20,7 +21,6 @@ function toggle(source) {
 }
 -->
 </script>
-<p id="title"><a id="titleA" href="/">pyTiVo</a></p>
 <table id="main">
     <tr id="header">
         <td colspan="2">
@@ -52,7 +52,7 @@ function toggle(source) {
 	    ## This is a folder
 		<td id="ColA"><a href='/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;Folder=$(row["UniqueId"])&amp;TiVo=$tivoIP'>$row['Title'] </a></td>
 		<td id="ColB"><div id="count">$(row["TotalItems"])</div></td>
-		<td id="ColC"><img src="/iphonearrow.png" alt=""></td>
+		<td id="ColC"><img src="/iPhoneArrow.png" alt=""></td>
 		#else
 	    ## This is a show
 		
