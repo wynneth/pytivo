@@ -181,7 +181,7 @@ class ToGo(Plugin):
         cname = query['Container'][0].split('/')[0]
         
         if useragent.lower().find('mobile') > 0:
-            t = Template(CONTAINER_TEMPLATE, filter=EncodeUnicode)
+            t = Template(CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
         else:
             t = Template(CONTAINER_TEMPLATE, filter=EncodeUnicode)
         t.escape = escape

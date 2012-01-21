@@ -8,7 +8,7 @@
 </head>
 <body>
 <form action="/TiVoConnect" method="POST">
-<p id="title"><a id="titleA" href="/">pyTivo - ToGo - </a></p>
+<p id="title"><a id="titleA" href="/">pyTivo - ToGo</a> <input style="font-size:16px" value="Transfer" type="submit"></p>
 <script language="JavaScript">
 <!--
 function toggle(source) {
@@ -21,6 +21,17 @@ function toggle(source) {
 }
 -->
 </script>
+<div id="pushmenu">
+<p id="title">
+ <input type="hidden" name="Command" value="ToGo">
+ <input type="hidden" name="Container" value="$container">
+ <input type="hidden" name="TiVo" value="$tivoIP">
+#if $has_tivodecode
+ <input type="checkbox" name="decode">Decrypt with tivodecode<br>
+#end if
+ <input type="checkbox" name="save">Save metadata to .txt<br>
+</p>
+</div>
 <table id="main">
     <tr id="header">
         <td colspan="2">
@@ -131,23 +142,6 @@ function toggle(source) {
      </td></tr>
   #end if
 </table>
-<p id="title">
- <input type="hidden" name="Command" value="ToGo">
- <input type="hidden" name="Container" value="$container">
- <input type="hidden" name="TiVo" value="$tivoIP">
- <input type="checkbox" name="save">Metadata<br>
-#if $togo_mpegts == 'default'
- <input type="checkbox" checked name="ts_format">Transfer as mpeg-ts<br>
-#elif $togo_mpegts == 'enabled'
- <input type="checkbox" name="ts_format">Transfer as mpeg-ts<br>
-#end if
-</p>
-<div id="pushmenu">
-#if $has_tivodecode
- <input type="checkbox" name="decode">Decrypt
-#end if
- <input style="font-size:16px" value="Transfer" type="submit">
-</div>
 </form>
 </body>
 </html>
