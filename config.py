@@ -10,22 +10,26 @@ import string
 import sys
 from ConfigParser import NoOptionError
 
-guid = ''.join([random.choice(string.letters) for i in range(10)])
-our_ip = ''
-config = ConfigParser.ConfigParser()
-
-p = os.path.dirname(__file__)
-config_files = ['/etc/pyTivo.conf', os.path.join(p, 'pyTivo.conf')]
-configs_found = []
-
-tivos = {}
-tivo_names = {}
-bin_paths = {}
-
 def init(argv):
+    global config
+    global guid
     global config_files
     global configs_found
+    global tivos
     global tivo_names
+    global bin_paths
+
+    config = ConfigParser.ConfigParser()
+
+    guid = ''.join([random.choice(string.ascii_letters) for i in range(10)])
+
+    p = os.path.dirname(__file__)
+    config_files = ['/etc/pyTivo.conf', os.path.join(p, 'pyTivo.conf')]
+    configs_found = []
+
+    tivos = {}
+    tivo_names = {}
+    bin_paths = {}
 
     try:
         opts, _ = getopt.getopt(argv, 'c:e:', ['config=', 'extraconf='])
@@ -77,13 +81,11 @@ def get_server(name, default=None):
 def getGUID():
     return guid
 
-def get_ip():
-    global our_ip
-    if not our_ip:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('4.2.2.1', 123))
-        our_ip = s.getsockname()[0]
-    return our_ip
+def get_ip(tsn=None):
+    dest_ip = tivos.get(tsn, '4.2.2.1')
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect((dest_ip, 123))
+    return s.getsockname()[0]
 
 def get_zc():
     opt = get_server('zeroconf', 'auto').lower()

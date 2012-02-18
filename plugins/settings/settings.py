@@ -17,9 +17,13 @@ CLASS_NAME = 'Settings'
 RESET_MSG = """<h3>Soft Reset</h3> <p>pyTivo has reloaded the 
 pyTivo.conf file and all changes should now be in effect.</p>"""
 
+RESTART_MSG = """<h3>Restart</h3> <p>pyTivo will now restart.</p>"""
+
+GOODBYE_MSG = 'Goodbye.\n'
+
 SETTINGS_MSG = """<h3>Settings Saved</h3> <p>Your settings have been 
-saved to the pyTivo.conf file. However you will need to do a <b>Soft 
-Reset</b> before these changes will take effect.</p>"""
+saved to the pyTivo.conf file. However you may need to do a <b>Soft 
+Reset</b> or <b>Restart</b> before these changes will take effect.</p>"""
 
 # Preload the templates
 tsname = os.path.join(SCRIPTDIR, 'templates', 'settings.tmpl')
@@ -27,6 +31,32 @@ SETTINGS_TEMPLATE = file(tsname, 'rb').read()
 
 class Settings(Plugin):
     CONTENT_TYPE = 'text/html'
+
+    def Quit(self, handler, query):
+        if hasattr(handler.server, 'shutdown'):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/plain')
+            handler.send_header('Content-Length', len(GOODBYE_MSG))
+            handler.send_header('Connection', 'close')
+            handler.end_headers()
+            handler.wfile.write(GOODBYE_MSG)
+            if handler.server.in_service:
+                handler.server.stop = True
+            else:
+                handler.server.shutdown()
+        else:
+            handler.send_error(501)
+
+    def Restart(self, handler, query):
+        if hasattr(handler.server, 'shutdown'):
+            handler.redir(RESTART_MSG, 10)
+            handler.server.restart = True
+            if handler.server.in_service:
+                handler.server.stop = True
+            else:
+                handler.server.shutdown()
+        else:
+            handler.send_error(501)
 
     def Reset(self, handler, query):
         config.reset()
@@ -74,6 +104,7 @@ class Settings(Plugin):
                         and not section.startswith('_tivo_HD')]
         t.tivos_known = buildhelp.getknown('tivos')
         t.help_list = buildhelp.gethelp()
+        t.has_shutdown = hasattr(handler.server, 'shutdown')
         handler.send_response(200)
         handler.send_header('Content-Type', 'text/html; charset=utf-8')
         handler.send_header('Expires', '0')

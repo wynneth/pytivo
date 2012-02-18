@@ -35,13 +35,13 @@ RELOAD = '<p>The <a href="%s">page</a> will reload in %d seconds.</p>'
 UNSUP = '<h3>Unsupported Command</h3> <p>Query:</p> <ul>%s</ul>'
 
 class TivoHTTPServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
-    containers = {}
-
     def __init__(self, server_address, RequestHandlerClass):
+        self.containers = {}
+        self.stop = False
+        self.restart = False
+        self.logger = logging.getLogger('pyTivo')
         BaseHTTPServer.HTTPServer.__init__(self, server_address,
                                            RequestHandlerClass)
-        self.daemon_threads = True
-        self.logger = logging.getLogger('pyTivo')
 
     def add_container(self, name, settings):
         if name in self.containers or name == 'TiVoConnect':
@@ -62,6 +62,9 @@ class TivoHTTPServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
 
     def set_beacon(self, beacon):
         self.beacon = beacon
+
+    def set_service_status(self, status):
+        self.in_service = status
 
 class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def __init__(self, request, client_address, server):
