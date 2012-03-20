@@ -58,8 +58,8 @@ function toggle(source) {
 	  #if $video.is_dir
 	    ## This is a folder
 		<td id="ColA"><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)/$quote($video.name)&amp;Format=text/html'>$video.title </a></td>
-        <td id="ColB"><div id="count">$video.total_items</div></td>
-		<td id="ColC"><img src="/iPhoneArrow.png" alt="" /></td>
+        <td id="ColB"><div id="count"><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)/$quote($video.name)&amp;Format=text/html'>$video.total_items</a></div></td>
+		<td id="ColC"><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)/$quote($video.name)&amp;Format=text/html'><img src="/iPhoneArrow.png" alt="" /></a></td>
 	  #else
 	    ## This is a show
 		<td id="ColA">
