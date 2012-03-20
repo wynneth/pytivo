@@ -159,7 +159,7 @@ class Music(Plugin):
             item = {}
             item['path'] = f.name
             item['part_path'] = f.name.replace(local_base_path, '', 1)
-            item['name'] = os.path.split(f.name)[1]
+            item['name'] = os.path.basename(f.name)
             item['is_dir'] = f.isdir
             item['is_playlist'] = f.isplay
             item['params'] = 'No'
@@ -220,7 +220,7 @@ class Music(Plugin):
                     item['ArtistName'] = artist
                     item['SongTitle'] = title
                     item['AlbumTitle'] = get_tag('album', audioFile)
-                    item['AlbumYear'] = get_tag('date', audioFile)
+                    item['AlbumYear'] = get_tag('date', audioFile)[:4]
                     item['MusicGenre'] = get_tag('genre', audioFile)
             except Exception, msg:
                 print msg

@@ -130,7 +130,7 @@ Available In: Server
 
 debug
 
-Default Setting: False
+Default Setting: True
 Valid Entries: True/False
 Required: No
 Skill: Advanced
@@ -500,6 +500,16 @@ sections.
 Example Settings: True, False
 Available In: Tivos, HD_tivos, SD_tivos
 
+ffmpeg_threads
+
+Default Setting: None
+Valid Entries: Any number up to 16 that represents the number of CPU threads FFmpeg has access to.
+Required: No
+Skill: Very Advanced
+Description:  Using multiple threads with FFmpeg if your CPU has them can speed up transcoding time.  Using a setting of '2' for a dual core CPU may show increased transcoding speeds of 10% or more.  If you have a dual core CPU with hyperthreading then the setting might be '4'.   There is a diminishing return for this setting so make sure to set this to no more than the amount of threads your CPU is capable of handling.  After a certain point the TiVo is the limiting speed factor.
+Example Settings: Any number from 1 to 16
+Available In: Server
+
 ffmpeg_pram
 
 Default Setting: None
@@ -507,10 +517,8 @@ Valid Entries: A valid ffmpeg command
 Required: No
 Skill: Very Advanced
 Description: This allows you to append additional raw ffmpeg commands to
-the ffmpeg template. For example, you would enter '-threads 2' here if
-you have multiple processors and want ffmpeg to use both processors to
-speed up transcoding.
-Example Settings: -threads 2
+the ffmpeg template.
+Example Settings: A valid FFmpeg command
 Available In: Server, Tivos, HD_tivos, SD_tivos
 
 ffmpeg_tmpl
@@ -518,7 +526,7 @@ ffmpeg_tmpl
 Default Setting: %(video_codec)s %(video_fps)s %(video_br)s
 %(max_video_br)s %(buff_size)s %(aspect_ratio)s
 %(audio_br)s %(audio_fr)s %(audio_ch)s %(audio_codec)s %(audio_lang)s
-%(ffmpeg_pram)s %(format)s
+%(ffmpeg_pram)s %(ffmpeg_threads)s %(format)s
 Valid Entries: A valid ffmpeg command
 Required: No
 Skill: Very Advanced
@@ -579,7 +587,7 @@ Description: Your username (email address) at tivo.com. This is required
 for the "Push" feature. If you don't plan to use Push, you don't need to 
 set this.
 Example Settings: user@example.com
-Available In: Server
+Available In: Server, Tivos, HD_tivos, SD_tivos
 
 tivo_password
 
@@ -590,7 +598,7 @@ Skill: Basic
 Description: Your password at tivo.com. This is required for the "Push" 
 feature. If you don't plan to use Push, you don't need to set this.
 Example Settings: password
-Available In: Server
+Available In: Server, Tivos, HD_tivos, SD_tivos
 
 tivo_mind
 
@@ -618,7 +626,7 @@ tivodecode (pushing .TiVo files, transcoding HD .TiVo files to SD
 TiVos). If you don't plan to use these features, you don't need to set 
 this.
 Example Settings: 012345678
-Available In: Server
+Available In: Server, Tivos, HD_tivos, SD_tivos
 
 togo_path
 
@@ -662,3 +670,30 @@ editor.
 Example Settings: True/False
 Available In: Server
 
+temp_share
+
+Default Setting: None
+Valid Entries: Share name
+Required: No
+Skill: Moderate
+Description: Sets a temporarily share to store your media content 
+that is being remuxed before being sent to your TiVo.  If content exists 
+on network share, setting this to a local share on the computer running 
+pyTivo will significantly speed up the process. If not set or share is not 
+valid pyTivo will use the original path of your media content for temporary storage. 
+Example Settings: Videos, Movies, TV Shows, etc.
+Available In: Server
+
+togo_mpegts
+
+Default Setting: False
+Valid Entries: True/False/Default
+Required: No
+Skill: Moderate
+Description: For Tivos that support mpeg-ts transfer. This will enable at tick box on 
+the togo screen, when this tick box is ticked pyTivo will transfer files in mpeg-ts format instead 
+of the default mpeg-ps. This is necessary if your video content contains h264 encoding. 
+True = display tick box. False = do not display tick box. Default = display tick box and 
+default to having it ticked.
+Example Settings: True/False/Default
+Available In: Server

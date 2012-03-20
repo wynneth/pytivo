@@ -10,26 +10,36 @@ import string
 import sys
 from ConfigParser import NoOptionError
 
+config_win_default = ''
+
+if sys.platform == "win32":
+    import _winreg
+
+    try:
+        explorerFolders = _winreg.OpenKey(
+        _winreg.HKEY_LOCAL_MACHINE,
+        'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
+        )
+
+        winCommonAppDataVal, winCommonAppDataType = _winreg.QueryValueEx(explorerFolders, 'Common AppData')
+
+        config_win_default = os.path.join(winCommonAppDataVal, 'pyTivo', 'pyTivo.conf')
+
+    except WindowsError:
+        print "Can't access Windows Registry to find common Application Data path."
+
 def init(argv):
-    global config
-    global guid
-    global config_files
-    global configs_found
     global tivos
     global tivo_names
-    global bin_paths
+    global guid
+    global config_files
 
-    config = ConfigParser.ConfigParser()
-
+    tivos = {}
+    tivo_names = {}
     guid = ''.join([random.choice(string.ascii_letters) for i in range(10)])
 
     p = os.path.dirname(__file__)
     config_files = ['/etc/pyTivo.conf', os.path.join(p, 'pyTivo.conf')]
-    configs_found = []
-
-    tivos = {}
-    tivo_names = {}
-    bin_paths = {}
 
     try:
         opts, _ = getopt.getopt(argv, 'c:e:', ['config=', 'extraconf='])
@@ -42,11 +52,21 @@ def init(argv):
         elif opt in ('-e', '--extraconf'):
             config_files.append(value)
 
+    reset()
+
+def reset():
+    global bin_paths
+    global config
+    global configs_found
+
+    bin_paths = {}
+
+    config = ConfigParser.ConfigParser()
     configs_found = config.read(config_files)
     if not configs_found:
-        print ('ERROR: pyTivo.conf does not exist.\n' +
-               'You must create this file before running pyTivo.')
-        sys.exit(1)
+        print ('WARNING: pyTivo.conf does not exist.\n' +
+               'Assuming default values.')
+        configs_found = config_files[-1:]
 
     for section in config.sections():
         if section.startswith('_tivo_'):
@@ -59,18 +79,19 @@ def init(argv):
                 if config.has_option(section, 'address'):
                     tivos[tsn] = config.get(section, 'address')
 
-def reset():
-    global config
-    global bin_paths
-    bin_paths.clear()
-    newconfig = ConfigParser.ConfigParser()
-    newconfig.read(config_files)
-    config = newconfig
+    for section in ['Server', '_tivo_SD', '_tivo_HD']:
+        if not config.has_section(section):
+            config.add_section(section)
 
 def write():
     f = open(configs_found[-1], 'w')
     config.write(f)
     f.close()
+
+def tivos_by_ip(tivoIP):
+    for key, value in tivos.items():
+        if value == tivoIP:
+            return key
 
 def get_server(name, default=None):
     if config.has_option('Server', name):
@@ -192,24 +213,19 @@ def getDebug():
     try:
         return config.getboolean('Server', 'debug')
     except NoOptionError, ValueError:
-        return False
+        return True
 
 def getOptres(tsn=None):
-    if tsn and config.has_section('_tivo_' + tsn):
-        try:
-            return config.getboolean('_tivo_' + tsn, 'optres')
-        except NoOptionError, ValueError:
-            pass
-    section_name = get_section(tsn)
-    if config.has_section(section_name):
-        try:
-            return config.getboolean(section_name, 'optres')
-        except NoOptionError, ValueError:
-            pass
     try:
-        return config.getboolean('Server', 'optres')
-    except NoOptionError, ValueError:
-        return False
+        return config.getboolean('_tivo_' + tsn, 'optres')
+    except:
+        try:
+            return config.getboolean(get_section(tsn), 'optres')
+        except:
+            try:
+                return config.getboolean('Server', 'optres')
+            except:
+                return False
 
 def getPixelAR(ref):
     if config.has_option('Server', 'par'):
@@ -263,7 +279,28 @@ def getFFmpegTemplate(tsn):
     return '%(video_codec)s %(video_fps)s %(video_br)s %(max_video_br)s \
             %(buff_size)s %(aspect_ratio)s %(audio_br)s \
             %(audio_fr)s %(audio_ch)s %(audio_codec)s %(audio_lang)s \
-            %(ffmpeg_pram)s %(format)s'
+            %(ffmpeg_pram)s %(ffmpeg_threads)s %(format)s'
+
+def getFFmpegThreads():
+    if config.has_option('Server', 'ffmpeg_threads'):
+        logger = logging.getLogger('pyTivo.config')
+        try:
+            threads = config.get('Server', 'ffmpeg_threads')
+            #older FFmpeg builds have history of crashing if threads < 1
+            #threads max is 16
+            if 1 <= int(threads) <= 16:
+                    return threads
+
+            else:
+                logger.debug(threads + ' is an invalid ffmpeg_threads setting, must be between 1 and 16, using default')
+                return None
+
+        except ValueError:
+            logger.debug(threads + ' is an invalid ffmpeg_threads setting, using defaults')
+            return None
+
+    else:
+        return None
 
 def getFFmpegPrams(tsn):
     return get_tsn('ffmpeg_pram', tsn, True)
@@ -364,22 +401,42 @@ def get_section(tsn):
     return ['_tivo_SD', '_tivo_HD'][isHDtivo(tsn)]
 
 def get_tsn(name, tsn=None, raw=False):
-    if tsn and config.has_section('_tivo_' + tsn):
-        try:
-            return config.get('_tivo_' + tsn, name, raw)
-        except NoOptionError:
-            pass
-    section_name = get_section(tsn)
-    if config.has_section(section_name):
-        try:
-            return config.get(section_name, name, raw)
-        except NoOptionError:
-            pass
     try:
-        return config.get('Server', name, raw)
-    except NoOptionError:
-        pass
-    return None
+        return config.get('_tivo_' + tsn, name, raw)
+    except:
+        try:
+            return config.get(get_section(tsn), name, raw)
+        except:
+            try:
+                return config.get('Server', name, raw)
+            except:
+                return None
+
+def get_random():
+    return ''.join([random.choice(string.digits) for i in range(3)])
+
+def get_freeSpace(share, inFile):
+    logger = logging.getLogger('pyTivo.config')
+
+    # checks free space of given output path
+    if sys.platform=="win32":
+        import ctypes
+        freeSize = ctypes.c_ulonglong(0)
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(share), None, None, ctypes.pointer(freeSize))
+        freeSize = freeSize.value
+        
+    else:
+        s = os.statvfs(share)
+        freeSize = s.f_bavail * s.f_frsize
+        
+    temp_fileSize = os.stat(inFile).st_size
+    
+    # checks if enough free space exists on drive for temp file (plus padding)
+    if freeSize < temp_fileSize*1.1:
+       logger.error('Not enough disk space to remux')
+       return False
+
+    return True
 
 # Parse a bitrate using the SI/IEEE suffix values as if by ffmpeg
 # For example, 2K==2000, 2Ki==2048, 2MB==16000000, 2MiB==16777216

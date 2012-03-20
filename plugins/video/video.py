@@ -97,9 +97,10 @@ class Video(Plugin):
         compatible = (not needs_tivodecode and
                       transcode.tivo_compatible(path, tsn, mime)[0])
 
-        offset = handler.headers.getheader('Range')
-        if offset:
-            offset = int(offset[6:-1])  # "bytes=XXX-"
+        try:  # "bytes=XXX-"
+            offset = int(handler.headers.getheader('Range')[6:-1])
+        except:
+            offset = 0
 
         if needs_tivodecode:
             valid = bool(config.get_bin('tivodecode') and
@@ -183,6 +184,7 @@ class Video(Plugin):
 
         if fname.endswith('.pyTivo-temp'):
             os.remove(fname)
+            logger.debug(fname + ' has been removed')
 
     def __duration(self, full_path):
         return transcode.video_info(full_path)['millisecs']
@@ -261,7 +263,7 @@ class Video(Plugin):
                  for k, v in sorted(vInfo.items(), reverse=True)] +
                 ['TRANSCODE OPTIONS: '] +
                 ["%s" % (v) for k, v in transcode_options.items()] +
-                ['SOURCE FILE: ', os.path.split(full_path)[1]]
+                ['SOURCE FILE: ', os.path.basename(full_path)]
             )
 
         now = datetime.utcnow()
@@ -333,12 +335,12 @@ class Video(Plugin):
                 ltime = time.localtime(mtime)
             video['captureDate'] = hex(mtime)
             video['textDate'] = time.strftime('%b %d, %Y', ltime)
-            video['name'] = os.path.split(f.name)[1]
+            video['name'] = os.path.basename(f.name)
             video['path'] = f.name
             video['part_path'] = f.name.replace(local_base_path, '', 1)
             if not video['part_path'].startswith(os.path.sep):
                 video['part_path'] = os.path.sep + video['part_path']
-            video['title'] = os.path.split(f.name)[1]
+            video['title'] = os.path.basename(f.name)
             video['is_dir'] = f.isdir
             if video['is_dir']:
                 video['small_path'] = subcname + '/' + video['name']
@@ -365,6 +367,7 @@ class Video(Plugin):
             videos.append(video)
 
         logger.debug('mobileagent: %d useragent: %s' % (useragent.lower().find('mobile'), useragent.lower()))
+
         if not use_html:
             t = Template(XML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
         elif useragent.lower().find('mobile') > 0:
@@ -447,6 +450,16 @@ class Video(Plugin):
         file_info = VideoDetails()
         file_info['valid'] = transcode.supported_format(f['path'])
 
+        temp_share = config.get_server('temp_share', '')
+        temp_share_path = ''
+        if temp_share:
+            for name, data in config.getShares():
+                if temp_share == name:
+                    temp_share_path = data.get('path')
+                    remux_path = temp_share_path
+        else:
+            remux_path = os.path.dirname(f['path'])
+            
         mime = 'video/mpeg'
         if config.isHDtivo(f['tsn']):
             for m in ['video/mp4', 'video/bif']:
@@ -455,11 +468,17 @@ class Video(Plugin):
                     break
 
             if (mime == 'video/mpeg' and
-                transcode.mp4_remuxable(f['path'], f['tsn'])):
-                new_path = transcode.mp4_remux(f['path'], f['name'])
+                transcode.mp4_remuxable(f['path'], f['tsn']) and config.get_freeSpace(remux_path, f['path'])):
+
+                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'], temp_share_path)
                 if new_path:
                     mime = 'video/mp4'
                     f['name'] = new_path
+                    if temp_share_path:
+                        ip = config.get_ip()
+                        port = config.getPort()
+                        container = quote(temp_share) + '/'
+                        f['url'] = 'http://%s:%s/%s' % (ip, port, container)
 
         if file_info['valid']:
             file_info.update(self.metadata_full(f['path'], f['tsn'], mime))

@@ -62,6 +62,7 @@ def setup(in_service=False):
     httpd.set_service_status(in_service)
 
     logger.info('pyTivo is ready.')
+    logger.debug('pyTivo/wynneth')
     return httpd
 
 def serve(httpd):
