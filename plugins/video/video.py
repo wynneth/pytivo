@@ -65,7 +65,108 @@ def isodt(iso):
 def isogm(iso):
     return int(calendar.timegm(uniso(iso)))
 
-class Video(Plugin):
+class Pushable(object):
+
+    def push_one_file(self, f):
+        file_info = VideoDetails()
+        file_info['valid'] = transcode.supported_format(f['path'])
+
+        mime = 'video/mpeg'
+        if config.isHDtivo(f['tsn']):
+            for m in ['video/mp4', 'video/bif']:
+                if transcode.tivo_compatible(f['path'], f['tsn'], m)[0]:
+                    mime = m
+                    break
+
+            if (mime == 'video/mpeg' and
+                transcode.mp4_remuxable(f['path'], f['tsn'])):
+                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'])
+                if new_path:
+                    mime = 'video/mp4'
+                    f['name'] = new_path
+
+        if file_info['valid']:
+            file_info.update(self.metadata_full(f['path'], f['tsn'], mime))
+
+        url = f['url'] + quote(f['name'])
+
+        title = file_info['seriesTitle']
+        if not title:
+            title = file_info['title']
+
+        source = file_info['seriesId']
+        if not source:
+            source = title
+
+        subtitle = file_info['episodeTitle']
+        try:
+            m = mind.getMind(f['tsn'])
+            m.pushVideo(
+                tsn = f['tsn'],
+                url = url,
+                description = file_info['description'],
+                duration = file_info['duration'] / 1000,
+                size = file_info['size'],
+                title = title,
+                subtitle = subtitle,
+                source = source,
+                mime = mime,
+                tvrating = file_info['tvRating'])
+        except Exception, msg:
+            logger.error(msg)
+
+    def process_queue(self):
+        while queue:
+            time.sleep(5)
+            item = queue.pop(0)
+            self.push_one_file(item)
+
+    def readip(self):
+        """ returns your external IP address by querying dyndns.org """
+        f = urllib.urlopen('http://checkip.dyndns.org/')
+        s = f.read()
+        m = re.search('([\d]*\.[\d]*\.[\d]*\.[\d]*)', s)
+        return m.group(0)
+
+    def Push(self, handler, query):
+        tsn = query['tsn'][0]
+        for key in config.tivo_names:
+            if config.tivo_names[key] == tsn:
+                tsn = key
+                break
+        tivo_name = config.tivo_names.get(tsn, tsn)
+
+        container = quote(query['Container'][0].split('/')[0])
+        ip = config.get_ip(tsn)
+        port = config.getPort()
+
+        baseurl = 'http://%s:%s/%s' % (ip, port, container)
+        if config.getIsExternal(tsn):
+            exturl = config.get_server('externalurl')
+            if exturl:
+                baseurl = exturl
+            else:
+                ip = self.readip()
+                baseurl = 'http://%s:%s/%s' % (ip, port, container)
+ 
+        path = self.get_local_base_path(handler, query)
+
+        files = query.get('File', [])
+        for f in files:
+            file_path = path + os.path.normpath(f)
+            queue.append({'path': file_path, 'name': f, 'tsn': tsn,
+                          'url': baseurl})
+            if len(queue) == 1:
+                thread.start_new_thread(Video.process_queue, (self,))
+
+            logger.info('[%s] Queued "%s" for Push to %s' %
+                        (time.strftime('%d/%b/%Y %H:%M:%S'),
+                         unicode(file_path, 'utf-8'), tivo_name))
+
+        files = [unicode(f, 'utf-8') for f in files]
+        handler.redir(PUSHED % (tivo_name, '<br>'.join(files)), 5)
+
+class BaseVideo(Plugin):
 
     CONTENT_TYPE = 'x-container/tivo-videos'
 
@@ -184,7 +285,6 @@ class Video(Plugin):
 
         if fname.endswith('.pyTivo-temp'):
             os.remove(fname)
-            logger.debug(fname + ' has been removed')
 
     def __duration(self, full_path):
         return transcode.video_info(full_path)['millisecs']
@@ -305,15 +405,13 @@ class Video(Plugin):
     def QueryContainer(self, handler, query):
         tsn = handler.headers.getheader('tsn', '')
         subcname = query['Container'][0]
-        cname = subcname.split('/')[0]
         useragent = handler.headers.getheader('User-Agent', '')
 
-        if (not cname in handler.server.containers or
-            not self.get_local_path(handler, query)):
+        if not self.get_local_path(handler, query):
             handler.send_error(404)
             return
 
-        container = handler.server.containers[cname]
+        container = handler.container
         precache = container.get('precache', 'False').lower() == 'true'
         force_alpha = container.get('force_alpha', 'False').lower() == 'true'
         use_html = query.get('Format', [''])[0].lower() == 'text/html'
@@ -374,7 +472,7 @@ class Video(Plugin):
             t = Template(HTML_CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
         else:
             t = Template(HTML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
-        t.container = cname
+        t.container = handler.cname
         t.name = subcname
         t.total = total
         t.start = start
@@ -438,128 +536,10 @@ class Video(Plugin):
 
         details = self.get_details_xml(tsn, file_path)
 
-        handler.send_response(200)
-        handler.send_header('Content-Type', 'text/xml')
-        handler.send_header('Content-Length', len(details))
-        handler.send_header('Connection', 'close')
-        handler.send_header('Expires', '0')
-        handler.end_headers()
-        handler.wfile.write(details)
+        handler.send_xml(details)
 
-    def push_one_file(self, f):
-        file_info = VideoDetails()
-        file_info['valid'] = transcode.supported_format(f['path'])
-
-        temp_share = config.get_server('temp_share', '')
-        temp_share_path = ''
-        if temp_share:
-            for name, data in config.getShares():
-                if temp_share == name:
-                    temp_share_path = data.get('path')
-                    remux_path = temp_share_path
-        else:
-            remux_path = os.path.dirname(f['path'])
-            
-        mime = 'video/mpeg'
-        if config.isHDtivo(f['tsn']):
-            for m in ['video/mp4', 'video/bif']:
-                if transcode.tivo_compatible(f['path'], f['tsn'], m)[0]:
-                    mime = m
-                    break
-
-            if (mime == 'video/mpeg' and
-                transcode.mp4_remuxable(f['path'], f['tsn']) and config.get_freeSpace(remux_path, f['path'])):
-
-                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'], temp_share_path)
-                if new_path:
-                    mime = 'video/mp4'
-                    f['name'] = new_path
-                    if temp_share_path:
-                        ip = config.get_ip()
-                        port = config.getPort()
-                        container = quote(temp_share) + '/'
-                        f['url'] = 'http://%s:%s/%s' % (ip, port, container)
-
-        if file_info['valid']:
-            file_info.update(self.metadata_full(f['path'], f['tsn'], mime))
-
-        url = f['url'] + quote(f['name'])
-
-        title = file_info['seriesTitle']
-        if not title:
-            title = file_info['title']
-
-        source = file_info['seriesId']
-        if not source:
-            source = title
-
-        subtitle = file_info['episodeTitle']
-        try:
-            m = mind.getMind(f['tsn'])
-            m.pushVideo(
-                tsn = f['tsn'],
-                url = url,
-                description = file_info['description'],
-                duration = file_info['duration'] / 1000,
-                size = file_info['size'],
-                title = title,
-                subtitle = subtitle,
-                source = source,
-                mime = mime,
-                tvrating = file_info['tvRating'])
-        except Exception, msg:
-            logger.error(msg)
-
-    def process_queue(self):
-        while queue:
-            time.sleep(5)
-            item = queue.pop(0)
-            self.push_one_file(item)
-
-    def Push(self, handler, query):
-        tsn = query['tsn'][0]
-        for key in config.tivo_names:
-            if config.tivo_names[key] == tsn:
-                tsn = key
-                break
-        tivo_name = config.tivo_names.get(tsn, tsn)
-
-        container = quote(query['Container'][0].split('/')[0])
-        ip = config.get_ip(tsn)
-        port = config.getPort()
-
-        baseurl = 'http://%s:%s/%s' % (ip, port, container)
-        if config.getIsExternal(tsn):
-            exturl = config.get_server('externalurl')
-            if exturl:
-                baseurl = exturl
-            else:
-                ip = self.readip()
-                baseurl = 'http://%s:%s/%s' % (ip, port, container)
- 
-        path = self.get_local_base_path(handler, query)
-
-        files = query.get('File', [])
-        for f in files:
-            file_path = path + os.path.normpath(f)
-            queue.append({'path': file_path, 'name': f, 'tsn': tsn,
-                          'url': baseurl})
-            if len(queue) == 1:
-                thread.start_new_thread(Video.process_queue, (self,))
-
-            logger.info('[%s] Queued "%s" for Push to %s' %
-                        (time.strftime('%d/%b/%Y %H:%M:%S'),
-                         unicode(file_path, 'utf-8'), tivo_name))
-
-        files = [unicode(f, 'utf-8') for f in files]
-        handler.redir(PUSHED % (tivo_name, '<br>'.join(files)), 5)
-
-    def readip(self):
-        """ returns your external IP address by querying dyndns.org """
-        f = urllib.urlopen('http://checkip.dyndns.org/')
-        s = f.read()
-        m = re.search('([\d]*\.[\d]*\.[\d]*\.[\d]*)', s)
-        return m.group(0)
+class Video(BaseVideo, Pushable):
+        pass
 
 class VideoDetails(DictMixin):
 

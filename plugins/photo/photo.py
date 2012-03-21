@@ -61,7 +61,9 @@ exif_orient_m = \
 
 # Preload the template
 tname = os.path.join(SCRIPTDIR, 'templates', 'container.tmpl')
+iname = os.path.join(SCRIPTDIR, 'templates', 'item.tmpl')
 PHOTO_TEMPLATE = file(tname, 'rb').read()
+ITEM_TEMPLATE = file(iname, 'rb').read()
 
 class Photo(Plugin):
     
@@ -101,12 +103,7 @@ class Photo(Plugin):
     def send_file(self, handler, path, query):
 
         def send_jpeg(data):
-            handler.send_response(200)
-            handler.send_header('Content-Type', 'image/jpeg')
-            handler.send_header('Content-Length', len(data))
-            handler.send_header('Connection', 'close')
-            handler.end_headers()
-            handler.wfile.write(data)
+            handler.send_fixed(data, 'image/jpeg')
 
         if 'Format' in query and query['Format'][0] != 'image/jpeg':
             handler.send_error(415)
@@ -273,11 +270,8 @@ class Photo(Plugin):
                 handler.send_error(404)
                 return
 
-        subcname = query['Container'][0]
-        cname = subcname.split('/')[0]
         local_base_path = self.get_local_base_path(handler, query)
-        if (not cname in handler.server.containers or
-            not self.get_local_path(handler, query)):
+        if not self.get_local_path(handler, query):
             handler.send_error(404)
             return
 
@@ -304,21 +298,28 @@ class Photo(Plugin):
             return item
 
         t = Template(PHOTO_TEMPLATE, filter=EncodeUnicode)
-        t.name = subcname
-        t.container = cname
+        t.name = query['Container'][0]
+        t.container = handler.cname
         t.files, t.total, t.start = self.get_files(handler, query,
             ImageFileFilter)
         t.files = map(media_data, t.files)
         t.quote = quote
         t.escape = escape
-        page = str(t)
 
-        handler.send_response(200)
-        handler.send_header('Content-Type', 'text/xml')
-        handler.send_header('Content-Length', len(page))
-        handler.send_header('Connection', 'close')
-        handler.end_headers()
-        handler.wfile.write(page)
+        handler.send_xml(str(t))
+
+    def QueryItem(self, handler, query):
+        uq = urllib.unquote_plus
+        splitpath = [x for x in uq(query['Url'][0]).split('/') if x]
+        path = os.path.join(handler.container['path'], *splitpath[1:])
+
+        if path in self.media_data_cache:
+            t = Template(ITEM_TEMPLATE, filter=EncodeUnicode)
+            t.file = self.media_data_cache[path]
+            t.escape = escape
+            handler.send_xml(str(t))
+        else:
+            handler.send_error(404)
 
     def get_files(self, handler, query, filterFunction):
 
@@ -379,8 +380,6 @@ class Photo(Plugin):
             else:
                 return y.isdir - x.isdir
 
-        subcname = query['Container'][0]
-        cname = subcname.split('/')[0]
         path = self.get_local_path(handler, query)
 
         # Build the list
@@ -432,7 +431,7 @@ class Photo(Plugin):
                 if start:
                     local_base_path = self.get_local_base_path(handler, query)
                     start = unquote(start)
-                    start = start.replace(os.path.sep + cname,
+                    start = start.replace(os.path.sep + handler.cname,
                                           local_base_path, 1)
                     filenames = [x.name for x in filelist.files]
                     try:
@@ -469,8 +468,8 @@ class Photo(Plugin):
             elif usedir and not useimg:
                 files = [x for x in files if x.isdir]
 
-        files, total, start = self.item_count(handler, query, cname, files,
-                                              filelist.last_start)
+        files, total, start = self.item_count(handler, query, handler.cname,
+                                              files, filelist.last_start)
         filelist.last_start = start
         filelist.release()
         return files, total, start

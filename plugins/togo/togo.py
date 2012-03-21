@@ -81,10 +81,8 @@ class ToGo(Plugin):
     def NPL(self, handler, query):
         global basic_meta
         shows_per_page = 50 # Change this to alter the number of shows returned
-        cname = query['Container'][0].split('/')[0]
         folder = ''
         has_tivodecode = bool(config.get_bin('tivodecode'))
-        togo_mpegts = config.get_server('togo_mpegts', 'False').lower()
         useragent = handler.headers.getheader('User-Agent', '')
 
         if 'TiVo' in query:
@@ -177,8 +175,6 @@ class ToGo(Plugin):
             ItemCount = 0
             FirstAnchor = ''
 
-        cname = query['Container'][0].split('/')[0]
-        
         if useragent.lower().find('mobile') > 0:
             t = Template(CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
         else:
@@ -190,10 +186,9 @@ class ToGo(Plugin):
         if tivoIP in queue:
             t.queue = queue[tivoIP]
         t.has_tivodecode = has_tivodecode
-        t.togo_mpegts = togo_mpegts
         t.tname = tivo_name
         t.tivoIP = tivoIP
-        t.container = cname
+        t.container = handler.cname
         t.data = data
         t.len = len
         t.TotalItems = int(TotalItems)
@@ -201,12 +196,7 @@ class ToGo(Plugin):
         t.ItemCount = int(ItemCount)
         t.FirstAnchor = quote(FirstAnchor)
         t.shows_per_page = shows_per_page
-        handler.send_response(200)
-        handler.send_header('Content-Type', 'text/html; charset=utf-8')
-        handler.send_header('Refresh', '300')
-        handler.send_header('Expires', '0')
-        handler.end_headers()
-        handler.wfile.write(t)
+        handler.send_html(str(t), refresh='300')
 
     def get_tivo_file(self, tivoIP, url, mak, togo_path):
         # global status
@@ -236,10 +226,7 @@ class ToGo(Plugin):
 
         auth_handler.add_password('TiVo DVR', url, 'tivo', mak)
         try:
-            if status[url]['ts_format']:
-                handle = self.tivo_open('%s&Format=video/x-tivo-mpeg-ts' % url)
-            else:
-                handle = self.tivo_open(url)
+            handle = self.tivo_open(url)
         except urllib2.HTTPError, e:
             status[url]['running'] = False
             status[url]['error'] = e.code
@@ -330,11 +317,10 @@ class ToGo(Plugin):
             urls = query.get('Url', [])
             decode = 'decode' in query
             save = 'save' in query
-            ts_format = 'ts_format' in query
             for theurl in urls:
                 status[theurl] = {'running': False, 'error': '', 'rate': '',
                                   'queued': True, 'size': 0, 'finished': False,
-                                  'decode': decode, 'save': save, 'ts_format' : ts_format}
+                                  'decode': decode, 'save': save}
                 if tivoIP in queue:
                     queue[tivoIP].append(theurl)
                 else:

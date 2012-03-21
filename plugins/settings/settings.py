@@ -34,12 +34,7 @@ class Settings(Plugin):
 
     def Quit(self, handler, query):
         if hasattr(handler.server, 'shutdown'):
-            handler.send_response(200)
-            handler.send_header('Content-Type', 'text/plain')
-            handler.send_header('Content-Length', len(GOODBYE_MSG))
-            handler.send_header('Connection', 'close')
-            handler.end_headers()
-            handler.wfile.write(GOODBYE_MSG)
+            handler.send_fixed(GOODBYE_MSG, 'text/plain')
             if handler.server.in_service:
                 handler.server.stop = True
             else:
@@ -79,9 +74,8 @@ class Settings(Plugin):
                                         dict(config.config.items(section,
                                                                  raw=True))))
 
-        cname = query['Container'][0].split('/')[0]
         t = Template(SETTINGS_TEMPLATE, filter=EncodeUnicode)
-        t.container = cname
+        t.container = handler.cname
         t.quote = quote
         t.server_data = dict(config.config.items('Server', raw=True))
         t.server_known = buildhelp.getknown('server')
@@ -99,11 +93,7 @@ class Settings(Plugin):
         t.tivos_known = buildhelp.getknown('tivos')
         t.help_list = buildhelp.gethelp()
         t.has_shutdown = hasattr(handler.server, 'shutdown')
-        handler.send_response(200)
-        handler.send_header('Content-Type', 'text/html; charset=utf-8')
-        handler.send_header('Expires', '0')
-        handler.end_headers()
-        handler.wfile.write(t)
+        handler.send_html(str(t))
 
     def UpdateSettings(self, handler, query):
         config.reset()

@@ -16,6 +16,15 @@ from plugin import GetPlugin, EncodeUnicode
 
 SCRIPTDIR = os.path.dirname(__file__)
 
+SERVER_INFO = """<?xml version="1.0" encoding="utf-8"?>
+<TiVoServer>
+<Version>1.6</Version>
+<InternalName>pyTivo</InternalName>
+<InternalVersion>1.0</InternalVersion>
+<Organization>pyTivo Developers</Organization>
+<Comment>http://pytivo.sf.net/</Comment>
+</TiVoServer>"""
+
 VIDEO_FORMATS = """<?xml version="1.0" encoding="utf-8"?>
 <TiVoFormats>
 <Format><ContentType>video/x-tivo-mpeg</ContentType><Description/></Format>
@@ -42,6 +51,7 @@ class TivoHTTPServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
         self.logger = logging.getLogger('pyTivo')
         BaseHTTPServer.HTTPServer.__init__(self, server_address,
                                            RequestHandlerClass)
+        self.daemon_threads = True
 
     def add_container(self, name, settings):
         if name in self.containers or name == 'TiVoConnect':
@@ -122,6 +132,20 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             query = cgi.parse_qs(qs, keep_blank_values=1)
         self.handle_query(query, tsn)
 
+    def do_command(self, query, command, target, tsn):
+        for name, container in config.getShares(tsn):
+            if target == name:
+                plugin = GetPlugin(container['type'])
+                if hasattr(plugin, command):
+                    self.cname = name
+                    self.container = container
+                    method = getattr(plugin, command)
+                    method(self, query)
+                    return True
+                else:
+                    break
+        return False
+
     def handle_query(self, query, tsn):
         mname = False
         if 'Command' in query and len(query['Command']) >= 1:
@@ -137,28 +161,29 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if 'Container' in query:
                 # Dispatch to the container plugin
                 basepath = query['Container'][0].split('/')[0]
-                for name, container in config.getShares(tsn):
-                    if basepath == name:
-                        plugin = GetPlugin(container['type'])
-                        if hasattr(plugin, command):
-                            method = getattr(plugin, command)
-                            method(self, query)
-                            return
-                        else:
-                            break
+                if self.do_command(query, command, basepath, tsn):
+                    return
+
+            elif command == 'QueryItem':
+                path = query.get('Url', [''])[0]
+                splitpath = [x for x in unquote_plus(path).split('/') if x]
+                if splitpath and not '..' in splitpath:
+                    if self.do_command(query, command, splitpath[0], tsn):
+                        return
 
             elif (command == 'QueryFormats' and 'SourceFormat' in query and
                   query['SourceFormat'][0].startswith('video')):
-                self.send_response(200)
-                self.send_header('Content-type', 'text/xml')
-                self.end_headers()
                 if config.hasTStivo(tsn):
-                    self.wfile.write(VIDEO_FORMATS_TS)
+                    self.send_xml(VIDEO_FORMATS_TS)
                 else:
-                    self.wfile.write(VIDEO_FORMATS)
+                    self.send_xml(VIDEO_FORMATS)
                 return
 
-            elif command == 'FlushServer':
+            elif command == 'QueryServer':
+                self.send_xml(SERVER_INFO)
+                return
+
+            elif command in ('FlushServer', 'ResetServer'):
                 # Does nothing -- included for completeness
                 self.send_response(200)
                 self.end_headers()
@@ -173,6 +198,8 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             ## Pass it off to a plugin?
             for name, container in self.server.containers.items():
                 if splitpath[0] == name:
+                    self.cname = name
+                    self.container = container
                     base = os.path.normpath(container['path'])
                     path = os.path.join(base, *splitpath[1:])
                     plugin = GetPlugin(container['type'])
@@ -219,15 +246,29 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if client_ip.startswith(allowedip):
                 return True
 
-        self.send_response(404)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write("Unauthorized.")
+        self.send_fixed('Unauthorized.', 'text/plain', 403)
         return False
 
     def log_message(self, format, *args):
         self.server.logger.info("%s [%s] %s" % (self.address_string(),
                                 self.log_date_time_string(), format%args))
+
+    def send_fixed(self, page, mime, code=200, refresh=''):
+        self.send_response(code)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', len(page))
+        self.send_header('Connection', 'close')
+        self.send_header('Expires', '0')
+        if refresh:
+            self.send_header('Refresh', refresh)
+        self.end_headers()
+        self.wfile.write(page)
+
+    def send_xml(self, page):
+        self.send_fixed(page, 'text/xml')
+
+    def send_html(self, page, code=200, refresh=''):
+        self.send_fixed(page, 'text/html; charset=utf-8', code, refresh)
 
     def root_container(self):
         tsn = self.headers.getheader('TiVo_TCD_ID', '')
@@ -235,9 +276,11 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         tsncontainers = []
         for section, settings in tsnshares:
             try:
-                settings['content_type'] = \
-                    GetPlugin(settings['type']).CONTENT_TYPE
-                tsncontainers.append((section, settings))
+                mime = GetPlugin(settings['type']).CONTENT_TYPE
+                if mime.split('/')[1] in ('tivo-videos', 'tivo-music',
+                                          'tivo-photos'):
+                    settings['content_type'] = mime
+                    tsncontainers.append((section, settings))
             except Exception, msg:
                 self.server.logger.error(section + ' - ' + str(msg))
         t = Template(file=os.path.join(SCRIPTDIR, 'templates',
@@ -247,16 +290,10 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         t.hostname = socket.gethostname()
         t.escape = escape
         t.quote = quote
-        self.send_response(200)
-        self.send_header('Content-type', 'text/xml')
-        self.end_headers()
-        self.wfile.write(t)
+        self.send_xml(str(t))
 
     def infopage(self):
         useragent = self.headers.getheader('User-Agent', '')
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
         if useragent.lower().find('mobile') > 0:
             t = Template(file=os.path.join(SCRIPTDIR, 'templates',
                                        'info_page_mob.tmpl'),
@@ -291,36 +328,29 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             'Command=NPL&amp;Container=' + quote(section) +  
                             '&amp;TiVo=' + config.tivos[tsn] + '">' + 
                             escape(config.tivo_names[tsn]) + '</a><br>')
-            elif ( plugin_type == 'video' or plugin_type == 'dvdvideo' ) \
-                    and t.shares:
-                t.shares += ('<a href="TiVoConnect?Command=' +
-                             'QueryContainer&amp;Container=' +
-                             quote(section) + '&Format=text/html">' +
-                             section + '</a><br>')
+            elif plugin_type and t.shares:
+                plugin = GetPlugin(plugin_type)
+                if hasattr(plugin, 'Push'):
+                    t.shares += ('<a href="/TiVoConnect?Command=' +
+                                 'QueryContainer&amp;Container=' +
+                                 quote(section) + '&Format=text/html">' +
+                                 section + '</a><br>')
 
-        self.wfile.write(t)
+        self.send_html(str(t))
 
     def unsupported(self, query):
         message = UNSUP % '\n'.join(['<li>%s: %s</li>' % (escape(key),
                                                           escape(repr(value)))
                                      for key, value in query.items()])
         text = BASE_HTML % message
-        self.send_response(404)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(text))
-        self.end_headers()
-        self.wfile.write(text)
+        self.send_html(text, code=404)
 
     def redir(self, message, seconds=2):
         url = self.headers.getheader('Referer')
         if url:
             message += RELOAD % (escape(url), seconds)
+            refresh = '%d; url=%s' % (seconds, url)
+        else:
+            refresh = ''
         text = (BASE_HTML % message).encode('utf-8')
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(text))
-        self.send_header('Expires', '0')
-        if url:
-            self.send_header('Refresh', '%d; url=%s' % (seconds, url))
-        self.end_headers()
-        self.wfile.write(text)
+        self.send_html(text, refresh=refresh)
