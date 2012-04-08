@@ -2,6 +2,7 @@
 
 import logging
 import os
+import platform
 import sys
 import time
 
@@ -18,6 +19,20 @@ def exceptionLogger(*args):
     sys.excepthook = sys.__excepthook__
     logging.getLogger('pyTivo').error('Exception in pyTivo', exc_info=args)
 
+def last_date():
+    lasttime = -1
+    path = os.path.dirname(__file__)
+    if not path:
+        path = '.'
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            if name.endswith('.py'):
+                tm = os.stat(os.path.join(root, name)).st_mtime
+                if tm > lasttime:
+                    lasttime = tm
+
+    return time.asctime(time.localtime(lasttime))
+
 def setup(in_service=False):
     config.init(sys.argv[1:])
     config.init_logging()
@@ -29,6 +44,9 @@ def setup(in_service=False):
         httpserver.TivoHTTPHandler)
 
     logger = logging.getLogger('pyTivo')
+    logger.info('Last modified: ' + last_date())
+    logger.info('Python: ' + platform.python_version())
+    logger.info('System: ' + platform.platform())
 
     for section, settings in config.getShares():
         httpd.add_container(section, settings)
