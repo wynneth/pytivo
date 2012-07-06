@@ -261,28 +261,7 @@ def getFFmpegTemplate(tsn):
     return '%(video_codec)s %(video_fps)s %(video_br)s %(max_video_br)s \
             %(buff_size)s %(aspect_ratio)s %(audio_br)s \
             %(audio_fr)s %(audio_ch)s %(audio_codec)s %(audio_lang)s \
-            %(ffmpeg_pram)s %(ffmpeg_threads)s %(format)s'
-
-def getFFmpegThreads():
-    if config.has_option('Server', 'ffmpeg_threads'):
-        logger = logging.getLogger('pyTivo.config')
-        try:
-            threads = config.get('Server', 'ffmpeg_threads')
-            #older FFmpeg builds have history of crashing if threads < 1
-            #threads max is 16
-            if 1 <= int(threads) <= 16:
-                    return threads
-
-            else:
-                logger.debug(threads + ' is an invalid ffmpeg_threads setting, must be between 1 and 16, using default')
-                return None
-
-        except ValueError:
-            logger.debug(threads + ' is an invalid ffmpeg_threads setting, using defaults')
-            return None
-
-    else:
-        return None
+            %(ffmpeg_pram)s %(format)s'
 
 def getFFmpegPrams(tsn):
     return get_tsn('ffmpeg_pram', tsn, True)
@@ -290,11 +269,13 @@ def getFFmpegPrams(tsn):
 def isHDtivo(tsn):  # tsn's of High Definition Tivo's
     return bool(tsn and tsn[0] >= '6' and tsn[:3] != '649')
 
-def hasTStivo(tsn):  # tsn's of Tivos that support transport streams
+def has_ts_flag():
     try:
         return config.getboolean('Server', 'ts')
     except NoOptionError, ValueError:
         return False
+
+def is_ts_capable(tsn):  # tsn's of Tivos that support transport streams
     return bool(tsn and (tsn[0] >= '7' or tsn.startswith('663')))
 
 def getValidWidths():

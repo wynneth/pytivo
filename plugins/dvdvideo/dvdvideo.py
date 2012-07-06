@@ -1,3 +1,44 @@
+# Module:       dvdvideo.py
+# Author:       Eric von Bayer
+# Updated By:   Luke Broadbent
+# Contact:      
+# Date:         June 5, 2012
+# Description:
+#     DVD Video plugin to allow playing DVD VIDEO_TS format folders on a TiVo
+#     This is closely aligned with video.py from the video plugin (from 
+#     wmcbrine's branch).
+#
+# Copyright (c) 2009, Eric von Bayer
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright notice,
+#      this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright notice,
+#      this list of conditions and the following disclaimer in the documentation
+#      and/or other materials provided with the distribution.
+#    * The names of the contributors may not be used to endorse or promote
+#      products derived from this software without specific prior written
+#      permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import sys
+
+if sys.version_info >= (3, 0):
+    raise "This plugin requires a 2.x version of python"
+
 import calendar
 import cgi
 import logging
@@ -21,13 +62,16 @@ import metadata
 import mind
 import qtfaststart
 import transcode
+import dvdfolder
+import virtualdvd
+
 from plugin import EncodeUnicode, Plugin, quote
 
-logger = logging.getLogger('pyTivo.video.video')
+logger = logging.getLogger('pyTivo.video.dvdvideo')
 
 SCRIPTDIR = os.path.dirname(__file__)
 
-CLASS_NAME = 'Video'
+CLASS_NAME = 'DVDVideo'
 
 PUSHED = '<h3>Queued for Push to %s</h3> <p>%s</p>'
 
@@ -52,7 +96,7 @@ use_extensions = True
 try:
     assert(config.get_bin('ffmpeg'))
 except:
-    use_extensions = False
+    raise "This plugin requires ffmpeg"
 
 queue = []  # Recordings to push
 
@@ -71,6 +115,13 @@ class Pushable(object):
         file_info = VideoDetails()
         file_info['valid'] = transcode.supported_format(f['path'])
 
+        temp_share = config.get_server('temp_share', '')
+        temp_share_path = ''
+        if temp_share:
+            for name, data in config.getShares():
+                if temp_share == name:
+                    temp_share_path = data.get('path')
+
         mime = 'video/mpeg'
         if config.isHDtivo(f['tsn']):
             for m in ['video/mp4', 'video/bif']:
@@ -80,10 +131,15 @@ class Pushable(object):
 
             if (mime == 'video/mpeg' and
                 transcode.mp4_remuxable(f['path'], f['tsn'])):
-                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'])
+                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'], temp_share_path)
                 if new_path:
                     mime = 'video/mp4'
                     f['name'] = new_path
+                    if temp_share_path:
+                        ip = config.get_ip()
+                        port = config.getPort()
+                        container = quote(temp_share) + '/'
+                        f['url'] = 'http://%s:%s/%s' % (ip, port, container)
 
         if file_info['valid']:
             file_info.update(self.metadata_full(f['path'], f['tsn'], mime))
@@ -144,9 +200,7 @@ class Pushable(object):
         if config.getIsExternal(tsn):
             exturl = config.get_server('externalurl')
             if exturl:
-                if not exturl.endswith('/'):
-                    exturl += '/'
-                baseurl = exturl + container
+                baseurl = exturl
             else:
                 ip = self.readip()
                 baseurl = 'http://%s:%s/%s' % (ip, port, container)
@@ -159,7 +213,7 @@ class Pushable(object):
             queue.append({'path': file_path, 'name': f, 'tsn': tsn,
                           'url': baseurl})
             if len(queue) == 1:
-                thread.start_new_thread(Video.process_queue, (self,))
+                thread.start_new_thread(DVDVideo.process_queue, (self,))
 
             logger.info('[%s] Queued "%s" for Push to %s' %
                         (time.strftime('%d/%b/%Y %H:%M:%S'),
@@ -175,7 +229,7 @@ class BaseVideo(Plugin):
     tvbus_cache = LRUCache(1)
 
     def pre_cache(self, full_path):
-        if Video.video_file_filter(self, full_path):
+        if DVDVideo.video_file_filter(self, full_path):
             transcode.supported_format(full_path)
 
     def video_file_filter(self, full_path, type=None):
@@ -211,19 +265,26 @@ class BaseVideo(Plugin):
         else:
             valid = True
 
+        ##DVDVideo
+        fname = unicode(path, 'utf-8')
+        if transcode.is_dvd( path ):
+            size = transcode.dvd_size( path )
+        else:
+            size = os.stat(fname).st_size
+
         if valid and offset:
-            valid = ((compatible and offset < os.stat(path).st_size) or
+            valid = ((compatible and offset < size) or
                      (not compatible and transcode.is_resumable(path, offset)))
 
         #faking = (mime in ['video/x-tivo-mpeg-ts', 'video/x-tivo-mpeg'] and
         faking = (mime == 'video/x-tivo-mpeg' and
                   not (is_tivo_file and compatible))
-        fname = unicode(path, 'utf-8')
+        #fname = unicode(path, 'utf-8')
         thead = ''
         if faking:
             thead = self.tivo_header(tsn, path, mime)
         if compatible:
-            size = os.stat(fname).st_size + len(thead)
+            size = size + len(thead)
             handler.send_response(200)
             handler.send_header('Content-Length', size - offset)
             handler.send_header('Content-Range', 'bytes %d-%d/%d' % 
@@ -313,6 +374,10 @@ class BaseVideo(Plugin):
         return count
 
     def __est_size(self, full_path, tsn='', mime=''):
+        ##DVDVideo
+        if transcode.is_dvd( full_path ):
+            return transcode.dvd_size( full_path )
+
         # Size is estimated by taking audio and video bit rate adding 2%
 
         if transcode.tivo_compatible(full_path, tsn, mime)[0]:
@@ -338,7 +403,7 @@ class BaseVideo(Plugin):
              config.getTivoWidth >= 1280)):
             data['showingBits'] = '4096'
 
-        data.update(metadata.basic(full_path))
+        data.update(self.metadata_basic(full_path))
         if full_path[-5:].lower() == '.tivo':
             data.update(metadata.from_tivo(full_path))
         if full_path[-4:].lower() == '.wtv':
@@ -404,12 +469,69 @@ class BaseVideo(Plugin):
 
         return data
 
+    def metadata_basic(self, full_path):
+        vdvd = virtualdvd.VirtualDVD(full_path)
+        if not vdvd.Valid():
+            return metadata.basic(full_path)
+
+        base_path, name = os.path.split(full_path)
+        title, ext = os.path.splitext(name)
+        mtime = os.stat(unicode(base_path, 'utf-8')).st_mtime
+        if (mtime < 0):
+            mtime = 0
+        originalAirDate = datetime.utcfromtimestamp(mtime)
+
+        if vdvd.DVDTitleName():
+            title = vdvd.DVDTitleName()
+
+        data = {'title': title,
+                    'originalAirDate': originalAirDate.isoformat()}
+        ext = ext.lower()
+        if ext in ['.mp4', '.m4v', '.mov']:
+            data.update(from_moov(full_path))
+        elif ext in ['.dvr-ms', '.asf', '.wmv']:
+            data.update(from_dvrms(full_path))
+        elif 'plistlib' in sys.modules and base_path.endswith('.eyetv'):
+            data.update(from_eyetv(full_path))
+        data.update(metadata.from_nfo(full_path))
+        data.update(metadata.from_text(full_path))
+
+        if 'episodeTitle' in data:
+            pass
+        elif 'Title '+ str(vdvd.TitleNumber()) in data:
+            data['episodeTitle'] = data['Title ' + str(vdvd.TitleNumber())]
+        else:
+            data['episodeTitle'] = vdvd.TitleName()
+
+        if vdvd.FileTitle().HasAngles():
+            if 'description' in data:    
+                data['description'] = "[Angle] " + data['description']
+            else:
+               data['description'] = "[Angle]"
+        if vdvd.FileTitle().HasInterleaved():
+            if 'description' in data:
+                data['description'] = "[ILVU] " + data['description']
+            else:
+                data['description'] = "[ILVU]"
+
+        return data
+
     def QueryContainer(self, handler, query):
         tsn = handler.headers.getheader('tsn', '')
         subcname = query['Container'][0]
         useragent = handler.headers.getheader('User-Agent', '')
+        dvd = None
 
-        if not self.get_local_path(handler, query):
+        if self.get_local_path(handler, query):
+            dir_path = self.get_local_path(handler, query)
+            if os.path.isdir(unicode(dir_path, 'utf-8')):
+                dvd = virtualdvd.VirtualDVD(dir_path, \
+                    float( handler.container.get( 'title_min', '10.0' ) ) )
+                if not (dvd.Valid() or dvd.HasErrors()):
+                    dvd = None
+                
+        if not self.get_local_path(handler, query) and \
+              not dvd:
             handler.send_error(404)
             return
 
@@ -418,9 +540,14 @@ class BaseVideo(Plugin):
         force_alpha = container.get('force_alpha', 'False').lower() == 'true'
         use_html = query.get('Format', [''])[0].lower() == 'text/html'
 
-        files, total, start = self.get_files(handler, query,
-                                             self.video_file_filter,
-                                             force_alpha)
+        # If the DVD folder is valid, then get the files and process them
+        if dvd:
+            files = dvd.GetFiles()
+            files, total, start = self.item_count(handler, query, handler.cname, files, 0)
+        else:
+            files, total, start = self.get_files(handler, query,
+                                                 self.video_file_filter,
+                                                 force_alpha)
 
         videos = []
         local_base_path = self.get_local_base_path(handler, query)
@@ -445,18 +572,38 @@ class BaseVideo(Plugin):
             if video['is_dir']:
                 video['small_path'] = subcname + '/' + video['name']
                 video['total_items'] = self.__total_items(f.name)
+                sub_dvd = virtualdvd.VirtualDVD( f.name )
+                if sub_dvd.QuickValid():
+                    # Greatly speed up listing
+                    if container.get('fast_listing', 'False').lower() == 'false':
+                        video['total_items'] = sub_dvd.NumFiles()
+                    else:
+                        video['total_items'] = 1
+                
+                elif sub_dvd.HasErrors():
+                    video['total_items'] = 0
             else:
+                if dvd != None and dvd.HasErrors():
+                    video['title'] = "Error in DVD Format"
+                    video['callsign'] = "DVD"
+                    video['displayMajorNumber'] = "1"
+                    video['displayMinorNumber'] = "0"
+                    video['description'] = f.title
+                    
                 if precache or len(files) == 1 or f.name in transcode.info_cache:
                     video['valid'] = transcode.supported_format(f.name)
                     if video['valid']:
                         video.update(self.metadata_full(f.name, tsn))
                         if len(files) == 1:
                             video['captureDate'] = hex(isogm(video['time']))
+                elif dvd != None and (dvd.Valid() or dvd.HasErrors()):
+                    video['valid'] = True
+                    video.update(self.metadata_basic(f.name))
                 else:
                     video['valid'] = True
                     video.update(metadata.basic(f.name))
 
-                if self.use_ts(tsn, f.name):
+                if config.has_ts_flag():
                     video['mime'] = 'video/x-tivo-mpeg-ts'
                 else:
                     video['mime'] = 'video/x-tivo-mpeg'
@@ -464,6 +611,8 @@ class BaseVideo(Plugin):
                 video['textSize'] = ( '%.3f GB' %
                     (float(f.size) / (1024 ** 3)) )
 
+            if video['episodeTitle'].lower().startswith('ignore'):
+                continue
             videos.append(video)
 
         logger.debug('mobileagent: %d useragent: %s' % (useragent.lower().find('mobile'), useragent.lower()))
@@ -491,20 +640,6 @@ class BaseVideo(Plugin):
             handler.send_html(str(t))
         else:
             handler.send_xml(str(t))
-
-    def use_ts(self, tsn, file_path):
-        if config.is_ts_capable(tsn):
-            if file_path[-5:].lower() == '.tivo':
-                try:
-                    flag = file(file_path).read(8)
-                except:
-                    return False
-                if ord(flag[7]) & 0x20:
-                    return True
-            elif config.has_ts_flag():
-                return True
-
-        return False
 
     def get_details_xml(self, tsn, file_path):
         if (tsn, file_path) in self.tvbus_cache:
@@ -552,7 +687,7 @@ class BaseVideo(Plugin):
 
         handler.send_xml(details)
 
-class Video(BaseVideo, Pushable):
+class DVDVideo(BaseVideo, Pushable):
         pass
 
 class VideoDetails(DictMixin):

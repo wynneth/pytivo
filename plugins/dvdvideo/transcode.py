@@ -1,3 +1,39 @@
+# Module:       dvdfolder.py
+# Author:       Eric von Bayer
+# Updated By:   Luke Broadbent
+# Contact:      
+# Date:         June 5, 2012
+# Description:
+#     Routines for transcoding DVD vob files to mpeg file the TiVo can play.
+#     This is closely aligned with transcode.py from the video plugin (from 
+#     wmcbrine's branch).
+#
+# Copyright (c) 2009, Eric von Bayer
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright notice,
+#      this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright notice,
+#      this list of conditions and the following disclaimer in the documentation
+#      and/or other materials provided with the distribution.
+#    * The names of the contributors may not be used to endorse or promote
+#      products derived from this software without specific prior written
+#      permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 import logging
 import math
 import os
@@ -13,6 +49,8 @@ import lrucache
 
 import config
 import metadata
+
+import vobstream
 
 logger = logging.getLogger('pyTivo.video.transcode')
 
@@ -96,6 +134,12 @@ def transcode(isQuery, inFile, outFile, tsn='', mime='', thead=''):
             ffmpeg = subprocess.Popen(cmd, stdin=tivodecode.stdout,
                                       stdout=subprocess.PIPE,
                                       bufsize=(512 * 1024))
+    elif vobstream.is_dvd(inFile):
+        cmd = [ffmpeg_path, '-i', '-'] + cmd_string.split()
+        ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                      stdout=subprocess.PIPE,
+                                      bufsize= BLOCKSIZE * MAXBLOCKS )
+        proc = vobstream.vobstream(False, inFile, ffmpeg, BLOCKSIZE)
     else:
         cmd = [ffmpeg_path, '-i', fname] + cmd_string.split()
         ffmpeg = subprocess.Popen(cmd, bufsize=(512 * 1024),
@@ -109,6 +153,11 @@ def transcode(isQuery, inFile, outFile, tsn='', mime='', thead=''):
                             'last_read': time.time(), 'blocks': []}
     if thead:
         ffmpeg_procs[inFile]['blocks'].append(thead)
+    if vobstream.is_dvd(inFile):
+        ffmpeg_procs[inFile]['stream'] = proc['stream']
+        ffmpeg_procs[inFile]['thread'] = proc['thread']
+        ffmpeg_procs[inFile]['event'] = proc['event']
+
     reap_process(inFile)
     return resume_transfer(inFile, outFile, 0)
 
@@ -202,6 +251,15 @@ def reap_process(inFile):
             reaper.start()
 
 def cleanup(inFile):
+    if vobstream.is_dvd(inFile):
+        proc = ffmpeg_procs[inFile]
+        kill(proc['process'])
+        proc['process'].wait()
+
+        # Tell thread to break out of loop
+        proc['event'].set()
+        proc['thread'].join()
+
     del ffmpeg_procs[inFile]
     reapers[inFile].cancel()
     del reapers[inFile]
@@ -271,6 +329,8 @@ def select_audioch(inFile, tsn):
     if video_info(inFile)['aCh'] > 6:
         debug('Too many audio channels for AC-3, using 5.1 instead')
         return '-ac 6'
+    elif video_info(inFile)['aCh']:
+        return '-ac %i' % video_info(inFile)['aCh']
     return ''
 
 def select_audiolang(inFile, tsn):
@@ -296,11 +356,10 @@ def select_audiolang(inFile, tsn):
             # now on
             elif len(langmatch_curr) > 1:
                 langmatch_prev = langmatch_curr[:]
-                langmatch_curr = []
         # if we drop out of the loop with more than 1 item default to
         # the first item
-        if len(langmatch_curr) > 1:
-            stream = langmatch_curr[0][0]
+        if len(langmatch_prev) > 1:
+            stream = langmatch_prev[0][0]
     # don't let FFmpeg auto select audio stream, pyTivo defaults to
     # first detected
     if stream:
@@ -392,36 +451,44 @@ def pad_TB(TIVO_WIDTH, TIVO_HEIGHT, multiplier, vInfo):
                       vInfo['vWidth']) * multiplier)
     if endHeight % 2:
         endHeight -= 1
-    topPadding = (TIVO_HEIGHT - endHeight) / 2
-    if topPadding % 2:
-        topPadding -= 1
-    newpad = pad_check()
-    if newpad:
-        return ['-vf', 'scale=%d:%d,pad=%d:%d:0:%d' % (TIVO_WIDTH,
-                endHeight, TIVO_WIDTH, TIVO_HEIGHT, topPadding)]
-    else:
-        bottomPadding = (TIVO_HEIGHT - endHeight) - topPadding
-        return ['-s', '%sx%s' % (TIVO_WIDTH, endHeight),
-                '-padtop', str(topPadding),
-                '-padbottom', str(bottomPadding)]
+    if endHeight < TIVO_HEIGHT * 0.99:
+        topPadding = (TIVO_HEIGHT - endHeight) / 2
+        if topPadding % 2:
+            topPadding -= 1
+        newpad = pad_check()
+        if newpad:
+            return ['-s', '%sx%s' % (TIVO_WIDTH, endHeight), '-vf',
+                    'pad=%d:%d:0:%d' % (TIVO_WIDTH, TIVO_HEIGHT, topPadding)]
+        else:
+            bottomPadding = (TIVO_HEIGHT - endHeight) - topPadding
+            return ['-s', '%sx%s' % (TIVO_WIDTH, endHeight),
+                    '-padtop', str(topPadding),
+                    '-padbottom', str(bottomPadding)]
+    else: # if only very small amount of padding needed, then
+          # just stretch it
+        return ['-s', '%sx%s' % (TIVO_WIDTH, TIVO_HEIGHT)]
 
 def pad_LR(TIVO_WIDTH, TIVO_HEIGHT, multiplier, vInfo):
     endWidth = int((TIVO_HEIGHT * vInfo['vWidth']) /
                    (vInfo['vHeight'] * multiplier))
     if endWidth % 2:
         endWidth -= 1
-    leftPadding = (TIVO_WIDTH - endWidth) / 2
-    if leftPadding % 2:
-        leftPadding -= 1
-    newpad = pad_check()
-    if newpad:
-        return ['-vf', 'scale=%d:%d,pad=%d:%d:%d:0' % (endWidth,
-                TIVO_HEIGHT, TIVO_WIDTH, TIVO_HEIGHT, leftPadding)]
-    else:
-        rightPadding = (TIVO_WIDTH - endWidth) - leftPadding
-        return ['-s', '%sx%s' % (endWidth, TIVO_HEIGHT),
-                '-padleft', str(leftPadding),
-                '-padright', str(rightPadding)]
+    if endWidth < TIVO_WIDTH * 0.99:
+        leftPadding = (TIVO_WIDTH - endWidth) / 2
+        if leftPadding % 2:
+            leftPadding -= 1
+        newpad = pad_check()
+        if newpad:
+            return ['-s', '%sx%s' % (endWidth, TIVO_HEIGHT), '-vf',
+                    'pad=%d:%d:%d:0' % (TIVO_WIDTH, TIVO_HEIGHT, leftPadding)]
+        else:
+            rightPadding = (TIVO_WIDTH - endWidth) - leftPadding
+            return ['-s', '%sx%s' % (endWidth, TIVO_HEIGHT),
+                    '-padleft', str(leftPadding),
+                    '-padright', str(rightPadding)]
+    else: # if only very small amount of padding needed, then
+          # just stretch it
+        return ['-s', '%sx%s' % (TIVO_WIDTH, TIVO_HEIGHT)]
 
 def select_aspect(inFile, tsn = ''):
     TIVO_WIDTH = config.getTivoWidth(tsn)
@@ -706,9 +773,14 @@ def mp4_remuxable(inFile, tsn=''):
     vInfo = video_info(inFile)
     return tivo_compatible_video(vInfo, tsn, 'video/mp4')[0]
 
-def mp4_remux(inFile, basename, tsn=''):
+def mp4_remux(inFile, basename, tsn='', temp_share_path=''):
     outFile = inFile + '.pyTivo-temp'
     newname = basename + '.pyTivo-temp'
+
+    if temp_share_path:
+        newname = os.path.splitext(os.path.split(basename)[1])[0] + '.mp4.pyTivo-temp'
+        outFile = os.path.join(temp_share_path, newname)
+
     if os.path.exists(outFile):
         return None  # ugh!
 
@@ -771,6 +843,11 @@ def tivo_compatible(inFile, tsn='', mime=''):
         cmessage = tivo_compatible_container(vInfo, inFile, mime)
         if not cmessage[0]:
             message = cmessage
+            break
+
+        dmessage = (False, 'All DVD Video must be re-encapsulated')
+        if vobstream.is_dvd(inFile):
+            message = dmessage
 
         break
 
@@ -781,7 +858,14 @@ def tivo_compatible(inFile, tsn='', mime=''):
 def video_info(inFile, cache=True):
     vInfo = dict()
     fname = unicode(inFile, 'utf-8')
-    mtime = os.stat(fname).st_mtime
+	#mtime = os.stat(fname).st_mtime
+    if vobstream.is_dvd(inFile):
+        is_dvd = True
+        mtime = os.stat(os.path.dirname(fname)).st_mtime
+    else:
+        is_dvd = False
+        mtime = os.stat(fname).st_mtime
+
     if cache:
         if inFile in info_cache and info_cache[inFile][0] == mtime:
             debug('CACHE HIT! %s' % inFile)
@@ -802,11 +886,18 @@ def video_info(inFile, cache=True):
 
     if mswindows:
         fname = fname.encode('iso8859-1')
-    cmd = [ffmpeg_path, '-i', fname]
+    #cmd = [ffmpeg_path, '-i', fname]
+    if is_dvd:
+        cmd = [ffmpeg_path, '-i', '-']
+    else:
+        cmd = [ffmpeg_path, '-i', fname]
+    debug('cmd: %s' % cmd)
     # Windows and other OS buffer 4096 and ffmpeg can output more than that.
     err_tmp = tempfile.TemporaryFile()
     ffmpeg = subprocess.Popen(cmd, stderr=err_tmp, stdout=subprocess.PIPE,
                               stdin=subprocess.PIPE)
+    if is_dvd:
+        vobstream.vobstream(True, inFile, ffmpeg, BLOCKSIZE)
 
     # wait configured # of seconds: if ffmpeg is not back give up
     wait = config.getFFmpegWait()
@@ -918,6 +1009,9 @@ def video_info(inFile, cache=True):
                               int(d.group(4)) * (10 ** (3 - len(d.group(4)))))
     else:
         vInfo['millisecs'] = 0
+
+    if is_dvd:
+        vInfo['millisecs'] = vobstream.duration(inFile)
 
     # get bitrate of source for tivo compatibility test.
     rezre = re.compile(r'.*bitrate: (.+) (?:kb/s).*')
@@ -1076,3 +1170,9 @@ def gcd(a, b):
     while b:
         a, b = b, a % b
     return a
+
+def dvd_size( full_path ):
+    return vobstream.size( full_path )
+
+def is_dvd( full_path ):
+    return vobstream.is_dvd( full_path)

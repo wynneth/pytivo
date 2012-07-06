@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib
 from xml.sax.saxutils import escape
 
@@ -36,9 +37,9 @@ TAGNAMES = {'artist': ['\xa9ART', 'Author'],
             'genre': ['\xa9gen', u'WM/Genre']}
 
 # Search strings for different playlist types
-asxfile = re.compile('ref +href *= *"(.+)"', re.IGNORECASE).search
-wplfile = re.compile('media +src *= *"(.+)"', re.IGNORECASE).search
-b4sfile = re.compile('Playstring="file:(.+)"').search
+asxfile = re.compile('ref +href *= *"([^"]*)"', re.IGNORECASE).search
+wplfile = re.compile('media +src *= *"([^"]*)"', re.IGNORECASE).search
+b4sfile = re.compile('Playstring="file:([^"]*)"').search
 plsfile = re.compile('[Ff]ile(\d+)=(.+)').match
 plstitle = re.compile('[Tt]itle(\d+)=(.+)').match
 plslength = re.compile('[Ll]ength(\d+)=(\d+)').match
@@ -411,6 +412,8 @@ class Music(Plugin):
                         continue
                     f = os.path.join(path, f)
                     isdir = os.path.isdir(f)
+                    if sys.platform == 'darwin':
+                        f = unicodedata.normalize('NFC', f)
                     f = f.encode('utf-8')
                     if recurse and isdir:
                         files.extend(build_recursive_list(f))
