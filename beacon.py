@@ -13,7 +13,7 @@ from plugin import GetPlugin
 
 SHARE_TEMPLATE = '/TiVoConnect?Command=QueryContainer&Container=%s'
 PLATFORM_MAIN = 'pyTivo'
-PLATFORM_VIDEO = 'pc'    # For the nice icon
+PLATFORM_VIDEO = 'pc/pyTivo'    # For the nice icon
 
 class ZCListener:
     def __init__(self, names):
@@ -87,6 +87,13 @@ class Beacon:
         self.UDPSock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
         self.services = []
 
+        self.platform = PLATFORM_VIDEO
+        for section, settings in config.getShares():
+            ct = GetPlugin(settings['type']).CONTENT_TYPE
+            if ct in ('x-container/tivo-music', 'x-container/tivo-photos'):
+                self.platform = PLATFORM_MAIN
+                break
+
         if config.get_zc():
             logger = logging.getLogger('pyTivo.beacon')
             try:
@@ -110,11 +117,10 @@ class Beacon:
 
     def format_beacon(self, conntype, services=True):
         beacon = ['tivoconnect=1',
-                  'swversion=1',
                   'method=%s' % conntype,
                   'identity=%s' % config.getGUID(),
                   'machine=%s' % gethostname(),
-                  'platform=%s' % PLATFORM_MAIN]
+                  'platform=%s' % self.platform]
 
         if services:
             beacon.append('services=' + self.format_services())

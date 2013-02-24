@@ -24,11 +24,12 @@
 # Version 0.2,  Dec. 8  -- thumbnail caching, faster thumbnails
 # Version 0.1,  Dec. 7, 2007
 
-import cgi
 import os
 import re
 import random
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -36,17 +37,21 @@ import urllib
 from cStringIO import StringIO
 from xml.sax.saxutils import escape
 
+use_pil = True
 try:
     from PIL import Image
 except ImportError:
     try:
         import Image
     except ImportError:
-        print 'Photo Plugin Error: The Python Imaging Library is not installed'
+        use_pil = False
+        print 'Python Imaging Library not found; using FFmpeg'
 
+import config
 from Cheetah.Template import Template
 from lrucache import LRUCache
 from plugin import EncodeUnicode, Plugin, quote, unquote
+from plugins.video.transcode import kill
 
 SCRIPTDIR = os.path.dirname(__file__)
 
@@ -61,11 +66,16 @@ exif_orient_i = \
 exif_orient_m = \
     re.compile('\x01\x12\x00\x03\x00\x00\x00\x01\x00(.)\x00\x00').search
 
+# Find size in FFmpeg output
+ffmpeg_size = re.compile(r'.*Video: .+, (\d+)x(\d+)[, ].*')
+
 # Preload the template
 tname = os.path.join(SCRIPTDIR, 'templates', 'container.tmpl')
 iname = os.path.join(SCRIPTDIR, 'templates', 'item.tmpl')
 PHOTO_TEMPLATE = file(tname, 'rb').read()
 ITEM_TEMPLATE = file(iname, 'rb').read()
+
+JFIF_TAG = '\xff\xe0\x00\x10JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00'
 
 class Photo(Plugin):
     
@@ -101,6 +111,222 @@ class Photo(Plugin):
     media_data_cache = LockedLRUCache(300)  # info and thumbnails
     recurse_cache = LockedLRUCache(5)       # recursive directory lists
     dir_cache = LockedLRUCache(10)          # non-recursive lists
+
+    def new_size(self, oldw, oldh, width, height, pshape):
+        pixw, pixh = [int(x) for x in pshape.split(':')]
+
+        if not width: width = oldw
+        if not height: height = oldh
+
+        oldw *= pixh
+        oldh *= pixw
+
+        ratio = float(oldw) / oldh
+
+        if float(width) / height < ratio:
+            height = int(width / ratio)
+        else:
+            width = int(height * ratio)
+
+        return width, height
+
+    def parse_exif(self, exif, rot, attrs):
+        # Capture date
+        if attrs and not 'odate' in attrs:
+            date = exif_date(exif)
+            if date:
+                year, month, day, hour, minute, second = (int(x)
+                    for x in date.groups())
+                if year:
+                    odate = time.mktime((year, month, day, hour,
+                                         minute, second, -1, -1, -1))
+                    attrs['odate'] = '%#x' % int(odate)
+
+        # Orientation
+        if attrs and 'exifrot' in attrs:
+            rot = (rot + attrs['exifrot']) % 360
+        else:
+            if exif[6] == 'I':
+                orient = exif_orient_i(exif)
+            else:
+                orient = exif_orient_m(exif)
+
+            if orient:
+                exifrot = {
+                    1:   0, 
+                    2:   0,
+                    3: 180,
+                    4: 180,
+                    5:  90,
+                    6: -90,
+                    7: -90,
+                    8:  90}.get(ord(orient.group(1)), 0)
+
+                rot = (rot + exifrot) % 360
+                if attrs:
+                    attrs['exifrot'] = exifrot
+
+        return rot
+
+    def get_image_pil(self, path, width, height, pshape, rot, attrs):
+        # Load
+        try:
+            pic = Image.open(unicode(path, 'utf-8'))
+        except Exception, msg:
+            return False, 'Could not open %s -- %s' % (path, msg)
+
+        # Set draft mode
+        try:
+            pic.draft('RGB', (width, height))
+        except Exception, msg:
+            return False, 'Failed to set draft mode for %s -- %s' % (path, msg)
+
+        # Read Exif data if possible
+        if 'exif' in pic.info:
+            rot = self.parse_exif(pic.info['exif'], rot, attrs)
+
+        # Rotate
+        try:
+            if rot:
+                pic = pic.rotate(rot)
+        except Exception, msg:
+            return False, 'Rotate failed on %s -- %s' % (path, msg)
+
+        # De-palletize
+        try:
+            if pic.mode not in ('RGB', 'L'):
+                pic = pic.convert('RGB')
+        except Exception, msg:
+            return False, 'Palette conversion failed on %s -- %s' % (path, msg)
+
+        # Old size
+        oldw, oldh = pic.size
+
+        width, height = self.new_size(oldw, oldh, width, height, pshape)
+
+        try:
+            pic = pic.resize((width, height), Image.ANTIALIAS)
+        except Exception, msg:
+            return False, 'Resize failed on %s -- %s' % (path, msg)
+
+        # Re-encode
+        try:
+            out = StringIO()
+            pic.save(out, 'JPEG', quality=85)
+            encoded = out.getvalue()
+            out.close()
+        except Exception, msg:
+            return False, 'Encode failed on %s -- %s' % (path, msg)
+
+        return True, encoded
+
+    def get_size_ffmpeg(self, ffmpeg_path, fname):
+        cmd = [ffmpeg_path, '-i', fname]
+        # Windows and other OS buffer 4096 and ffmpeg can output more
+        # than that.
+        err_tmp = tempfile.TemporaryFile()
+        ffmpeg = subprocess.Popen(cmd, stderr=err_tmp,
+                                  stdout=subprocess.PIPE,
+                                  stdin=subprocess.PIPE)
+
+        # wait configured # of seconds: if ffmpeg is not back give up
+        limit = config.getFFmpegWait()
+        if limit:
+            for i in xrange(limit * 20):
+                time.sleep(.05)
+                if not ffmpeg.poll() == None:
+                    break
+
+            if ffmpeg.poll() == None:
+                kill(ffmpeg)
+                return False, 'FFmpeg timed out'
+        else:
+            ffmpeg.wait()
+
+        err_tmp.seek(0)
+        output = err_tmp.read()
+        err_tmp.close()
+
+        x = ffmpeg_size.search(output)
+        if x:
+            width = int(x.group(1))
+            height = int(x.group(2))
+        else:
+            return False, "Couldn't parse size"
+
+        return True, (width, height)
+
+    def get_image_ffmpeg(self, path, width, height, pshape, rot, attrs):
+        ffmpeg_path = config.get_bin('ffmpeg')
+        if not ffmpeg_path:
+            return False, 'FFmpeg not found'
+
+        fname = unicode(path, 'utf-8')
+        if sys.platform == 'win32':
+            fname = fname.encode('iso8859-1')
+
+        if attrs and 'size' in attrs:
+            result = attrs['size']
+        else:
+            status, result = self.get_size_ffmpeg(ffmpeg_path, fname)
+            if not status:
+                return False, result
+            if attrs:
+                attrs['size'] = result
+
+        if rot in (90, 270):
+            oldh, oldw = result
+        else:
+            oldw, oldh = result
+
+        width, height = self.new_size(oldw, oldh, width, height, pshape)
+
+        if rot == 270:
+            filters = 'transpose=1,'
+        elif rot == 180:
+            filters = 'hflip,vflip,'
+        elif rot == 90:
+            filters = 'transpose=2,'
+        else:
+            filters = ''
+
+        filters += 'format=yuvj420p,'
+
+        neww, newh = oldw, oldh
+        while (neww / width >= 50) or (newh / height >= 50):
+            neww /= 2
+            newh /= 2
+            filters += 'scale=%d:%d,' % (neww, newh)
+
+        filters += 'scale=%d:%d' % (width, height)
+
+        cmd = [ffmpeg_path, '-i', fname, '-vf', filters, '-f', 'mjpeg', '-']
+        jpeg_tmp = tempfile.TemporaryFile()
+        ffmpeg = subprocess.Popen(cmd, stdout=jpeg_tmp,
+                                  stdin=subprocess.PIPE)
+
+        # wait configured # of seconds: if ffmpeg is not back give up
+        limit = config.getFFmpegWait()
+        if limit:
+            for i in xrange(limit * 20):
+                time.sleep(.05)
+                if not ffmpeg.poll() == None:
+                    break
+
+            if ffmpeg.poll() == None:
+                kill(ffmpeg)
+                return False, 'FFmpeg timed out'
+        else:
+            ffmpeg.wait()
+
+        jpeg_tmp.seek(0)
+        output = jpeg_tmp.read()
+        jpeg_tmp.close()
+
+        if 'JFIF' not in output[:10]:
+            output = output[:2] + JFIF_TAG + output[2:]
+
+        return True, output
 
     def send_file(self, handler, path, query):
 
@@ -138,130 +364,28 @@ class Photo(Plugin):
             send_jpeg(attrs['thumb'])
             return
 
-        # Load
-        try:
-            pic = Image.open(unicode(path, 'utf-8'))
-        except Exception, msg:
-            handler.server.logger.error('Could not open %s -- %s' %
-                                        (path, msg))
-            handler.send_error(404)
-            return
+        # Requested pixel shape
+        pshape = query.get('PixelShape', ['1:1'])[0]
 
-        # Set draft mode
-        try:
-            pic.draft('RGB', (width, height))
-        except Exception, msg:
-            handler.server.logger.error('Failed to set draft mode ' +
-                                        'for %s -- %s' % (path, msg))
-            handler.send_error(404)
-            return
-
-        # Read Exif data if possible
-        if 'exif' in pic.info:
-            exif = pic.info['exif']
-
-            # Capture date
-            if attrs and not 'odate' in attrs:
-                date = exif_date(exif)
-                if date:
-                    year, month, day, hour, minute, second = (int(x)
-                        for x in date.groups())
-                    if year:
-                        odate = time.mktime((year, month, day, hour,
-                                             minute, second, -1, -1, -1))
-                        attrs['odate'] = '%#x' % int(odate)
-
-            # Orientation
-            if attrs and 'exifrot' in attrs:
-                rot = (rot + attrs['exifrot']) % 360
-            else:
-                if exif[6] == 'I':
-                    orient = exif_orient_i(exif)
-                else:
-                    orient = exif_orient_m(exif)
-
-                if orient:
-                    exifrot = {
-                        1:   0, 
-                        2:   0,
-                        3: 180,
-                        4: 180,
-                        5:  90,
-                        6: -90,
-                        7: -90,
-                        8:  90}.get(ord(orient.group(1)), 0)
-
-                    rot = (rot + exifrot) % 360
-                    if attrs:
-                        attrs['exifrot'] = exifrot
-
-        # Rotate
-        try:
-            if rot:
-                pic = pic.rotate(rot)
-        except Exception, msg:
-            handler.server.logger.error('Rotate failed on %s -- %s' %
-                                        (path, msg))
-            handler.send_error(404)
-            return
-
-        # De-palletize
-        try:
-            if pic.mode == 'P':
-                pic = pic.convert()
-        except Exception, msg:
-            handler.server.logger.error('Palette conversion failed ' +
-                                        'on %s -- %s' % (path, msg))
-            handler.send_error(404)
-            return
-
-        # Old size
-        oldw, oldh = pic.size
-
-        if not width: width = oldw
-        if not height: height = oldh
-
-        # Correct aspect ratio
-        if 'PixelShape' in query:
-            pixw, pixh = query['PixelShape'][0].split(':')
-            oldw *= int(pixh)
-            oldh *= int(pixw)
-
-        # Resize
-        ratio = float(oldw) / oldh
-
-        if float(width) / height < ratio:
-            height = int(width / ratio)
+        # Build a new image
+        if use_pil:
+            status, result = self.get_image_pil(path, width, height, 
+                                                pshape, rot, attrs)
         else:
-            width = int(height * ratio)
+            status, result = self.get_image_ffmpeg(path, width, height, 
+                                                   pshape, rot, attrs)
 
-        try:
-            pic = pic.resize((width, height), Image.ANTIALIAS)
-        except Exception, msg:
-            handler.server.logger.error('Resize failed on %s -- %s' %
-                                        (path, msg))
+        if status:
+            # Save thumbnails
+            if attrs and width < 100 and height < 100:
+                attrs['thumb'] = result
+
+            # Send it
+            send_jpeg(result)
+        else:
+            handler.server.logger.error(result)
             handler.send_error(404)
-            return
 
-        # Re-encode
-        try:
-            out = StringIO()
-            pic.save(out, 'JPEG')
-            encoded = out.getvalue()
-            out.close()
-        except Exception, msg:
-            handler.server.logger.error('Encode failed on %s -- %s' %
-                                        (path, msg))
-            handler.send_error(404)
-            return
-
-        # Save thumbnails
-        if attrs and width < 100 and height < 100:
-            attrs['thumb'] = encoded
-
-        # Send it
-        send_jpeg(encoded)
-        
     def QueryContainer(self, handler, query):
 
         # Reject a malformed request -- these attributes should only

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import logging
 import os
 import subprocess
 import sys
@@ -32,7 +33,8 @@ MPAA_RATINGS = {'G': 1, 'PG': 2, 'PG-13': 3, 'PG13': 3, 'R': 4, 'X': 5,
                 'P2': 2, 'P3': 3, 'R4': 4, 'X5': 5, 'N6': 6, 'N8': 8}
 
 STAR_RATINGS = {'1': 1, '1.5': 2, '2': 3, '2.5': 4, '3': 5, '3.5': 6,
-                '4': 7, '*': 1, '**': 3, '***': 5, '****': 7}
+                '4': 7, '*': 1, '**': 3, '***': 5, '****': 7, 'X1': 1,
+                'X2': 2, 'X3': 3, 'X4': 4, 'X5': 5, 'X6': 6, 'X7': 7}
 
 HUMAN = {'mpaaRating': {1: 'G', 2: 'PG', 3: 'PG-13', 4: 'R', 5: 'X',
                         6: 'NC-17', 8: 'NR'},
@@ -61,10 +63,14 @@ def get_stars(rating):
 
 def tag_data(element, tag):
     for name in tag.split('/'):
-        new_element = element.getElementsByTagName(name)
-        if not new_element:
+        found = False
+        for new_element in element.childNodes:
+            if new_element.nodeName == name:
+                found = True
+                element = new_element
+                break
+        if not found:
             return ''
-        element = new_element[0]
     if not element.firstChild:
         return ''
     return element.firstChild.data
@@ -306,6 +312,12 @@ def from_text(full_path):
         x = metadata.get(rating, '').upper()
         if x in ratings:
             metadata[rating] = ratings[x]
+        else:
+            try:
+                x = int(x)
+                metadata[rating] = x
+            except:
+                pass
 
     return metadata
 
@@ -335,10 +347,11 @@ def from_container(xmldoc):
     metadata = {}
 
     keys = {'title': 'Title', 'episodeTitle': 'EpisodeTitle',
-            'description': 'Description', 'seriesId': 'SeriesId',
-            'episodeNumber': 'EpisodeNumber', 'tvRating': 'TvRating',
-            'displayMajorNumber': 'SourceChannel', 'callsign': 'SourceStation',
-            'showingBits': 'ShowingBits', 'mpaaRating': 'MpaaRating'}
+            'description': 'Description', 'programId': 'ProgramId',
+            'seriesId': 'SeriesId', 'episodeNumber': 'EpisodeNumber',
+            'tvRating': 'TvRating', 'displayMajorNumber': 'SourceChannel',
+            'callsign': 'SourceStation', 'showingBits': 'ShowingBits',
+            'mpaaRating': 'MpaaRating'}
 
     details = xmldoc.getElementsByTagName('Details')[0]
 
@@ -367,6 +380,7 @@ def from_details(xml):
              'title': 'program/title',
              'episodeTitle': 'program/episodeTitle',
              'episodeNumber': 'program/episodeNumber',
+             'programId': 'program/uniqueId',
              'seriesId': 'program/series/uniqueId',
              'seriesTitle': 'program/series/seriesTitle',
              'originalAirDate': 'program/originalAirDate',
@@ -649,10 +663,11 @@ def dump(output, metadata):
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         metadata = {}
+        config.init([])
+        logging.basicConfig()
         fname = force_utf8(sys.argv[1])
         ext = os.path.splitext(fname)[1].lower()
         if ext == '.tivo':
-            config.init([])
             metadata.update(from_tivo(fname))
         elif ext in ['.mp4', '.m4v', '.mov']:
             metadata.update(from_moov(fname))

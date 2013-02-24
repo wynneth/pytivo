@@ -24,6 +24,8 @@
 
     History
     -------
+     * 2013-01-28: Support strange zero-name, zero-length atoms, re-license
+                   under the MIT license, version bump to 1.7
      * 2010-02-21: Add support for final mdat atom with zero size, patch by
                    Dmitry Simakov <basilio AT j-vista DOT ru>, version bump
                    to 1.4.
@@ -36,20 +38,28 @@
 
     License
     -------
-    Copyright (C) 2008 - 2009  Daniel G. Taylor <dan@programmer-art.org>
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+    Copyright (C) 2008 - 2013  Daniel G. Taylor <dan@programmer-art.org>
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+    Permission is hereby granted, free of charge, to any person 
+    obtaining a copy of this software and associated documentation files 
+    (the "Software"), to deal in the Software without restriction, 
+    including without limitation the rights to use, copy, modify, merge, 
+    publish, distribute, sublicense, and/or sell copies of the Software, 
+    and to permit persons to whom the Software is furnished to do so, 
+    subject to the following conditions:
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    The above copyright notice and this permission notice shall be 
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF 
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS 
+    BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN 
+    ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
+    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE 
+    SOFTWARE.
 """
 
 import logging
@@ -57,7 +67,7 @@ import struct
 
 from StringIO import StringIO
 
-VERSION = "1.4wjm3"
+VERSION = "1.7wjm3"
 CHUNK_SIZE = 8192
 SEEK_CUR = 1  # Not defined in Python 2.4, so we define it here -- WJM3
 
@@ -109,10 +119,14 @@ def get_index(datastream):
         index.append((atom_type, datastream.tell() - skip, atom_size))
 
         if atom_size == 0:
-            # Some files may end in mdat with no size set, which generally
-            # means to seek to the end of the file. We can just stop indexing
-            # as no more entries will be found!
-            break
+            if atom_type == "mdat":
+                # Some files may end in mdat with no size set, which
+                # generally means to seek to the end of the file. We can
+                # just stop indexing as no more entries will be found!
+                break
+            else:
+                # Weird, but just continue to try to find more atoms
+                atom_size = skip
 
         datastream.seek(atom_size - skip, SEEK_CUR)
 
@@ -191,7 +205,11 @@ def process(datastream, outfile, skip=0):
             # This free atom is before the mdat!
             free_size += size
             log.info("Removing free atom at %d (%d bytes)" % (pos, size))
-
+        elif atom == "\x00\x00\x00\x00" and pos < mdat_pos:
+            # This is some strange zero atom with incorrect size
+            free_size += 8
+            log.info("Removing strange zero atom at %s (8 bytes)" % pos)
+ 
     # Offset to shift positions
     offset = moov_size - free_size
 

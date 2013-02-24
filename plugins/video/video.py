@@ -174,10 +174,6 @@ class BaseVideo(Plugin):
 
     tvbus_cache = LRUCache(1)
 
-    def pre_cache(self, full_path):
-        if Video.video_file_filter(self, full_path):
-            transcode.supported_format(full_path)
-
     def video_file_filter(self, full_path, type=None):
         if os.path.isdir(unicode(full_path, 'utf-8')):
             return True
@@ -319,10 +315,8 @@ class BaseVideo(Plugin):
             return int(os.stat(unicode(full_path, 'utf-8')).st_size)
         else:
             # Must be re-encoded
-            if config.get_tsn('audio_codec', tsn) == None:
-                audioBPS = config.getMaxAudioBR(tsn) * 1000
-            else:
-                audioBPS = config.strtod(config.getAudioBR(tsn))
+            audioBPS = config.getMaxAudioBR(tsn) * 1000
+            #audioBPS = config.strtod(config.getAudioBR(tsn))
             videoBPS = transcode.select_videostr(full_path, tsn)
             bitrate =  audioBPS + videoBPS
             return int((self.__duration(full_path) / 1000) *
@@ -414,7 +408,6 @@ class BaseVideo(Plugin):
             return
 
         container = handler.container
-        precache = container.get('precache', 'False').lower() == 'true'
         force_alpha = container.get('force_alpha', 'False').lower() == 'true'
         use_html = query.get('Format', [''])[0].lower() == 'text/html'
 
@@ -446,7 +439,7 @@ class BaseVideo(Plugin):
                 video['small_path'] = subcname + '/' + video['name']
                 video['total_items'] = self.__total_items(f.name)
             else:
-                if precache or len(files) == 1 or f.name in transcode.info_cache:
+                if len(files) == 1 or f.name in transcode.info_cache:
                     video['valid'] = transcode.supported_format(f.name)
                     if video['valid']:
                         video.update(self.metadata_full(f.name, tsn))
@@ -475,7 +468,6 @@ class BaseVideo(Plugin):
                 t = Template(HTML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
         else:
             t = Template(XML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
-
         t.container = handler.cname
         t.name = subcname
         t.total = total

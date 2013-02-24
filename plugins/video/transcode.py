@@ -59,7 +59,7 @@ def debug(msg):
     logger.debug(msg)
 
 def transcode(isQuery, inFile, outFile, tsn='', mime='', thead=''):
-    settings = {'video_codec': select_videocodec(inFile, tsn),
+    settings = {'video_codec': select_videocodec(inFile, tsn, mime),
                 'video_br': select_videobr(inFile, tsn),
                 'video_fps': select_videofps(inFile, tsn),
                 'max_video_br': select_maxvideobr(tsn),
@@ -211,40 +211,38 @@ def select_audiocodec(isQuery, inFile, tsn='', mime=''):
         return '-acodec copy'
     vInfo = video_info(inFile)
     codectype = vInfo['vCodec']
-    codec = config.get_tsn('audio_codec', tsn)
-    if not codec:
-        # Default, compatible with all TiVo's
-        codec = 'ac3'
-        if mime == 'video/mp4':
-            compatiblecodecs = ('mpeg4aac', 'libfaad', 'mp4a', 'aac',
-                                'ac3', 'liba52')
-        else:
-            compatiblecodecs = ('ac3', 'liba52', 'mp2')
+    # Default, compatible with all TiVo's
+    codec = 'ac3'
+    if mime == 'video/mp4':
+        compatiblecodecs = ('mpeg4aac', 'libfaad', 'mp4a', 'aac',
+                            'ac3', 'liba52')
+    else:
+        compatiblecodecs = ('ac3', 'liba52', 'mp2')
 
-        if vInfo['aCodec'] in compatiblecodecs:
-            aKbps = vInfo['aKbps']
-            aCh = vInfo['aCh']
-            if aKbps == None:
-                if vInfo['aCodec'] in ('mpeg4aac', 'libfaad', 'mp4a', 'aac'):
-                    # along with the channel check below this should
-                    # pass any AAC audio that has undefined 'aKbps' and
-                    # is <= 2 channels.  Should be TiVo compatible.
-                    codec = 'copy'
-                elif not isQuery:
-                    vInfoQuery = audio_check(inFile, tsn)
-                    if vInfoQuery == None:
-                        aKbps = None
-                        aCh = None
-                    else:
-                        aKbps = vInfoQuery['aKbps']
-                        aCh = vInfoQuery['aCh']
-                else:
-                    codec = 'TBA'
-            if aKbps and int(aKbps) <= config.getMaxAudioBR(tsn):
-                # compatible codec and bitrate, do not reencode audio
+    if vInfo['aCodec'] in compatiblecodecs:
+        aKbps = vInfo['aKbps']
+        aCh = vInfo['aCh']
+        if aKbps == None:
+            if vInfo['aCodec'] in ('mpeg4aac', 'libfaad', 'mp4a', 'aac'):
+                # along with the channel check below this should
+                # pass any AAC audio that has undefined 'aKbps' and
+                # is <= 2 channels.  Should be TiVo compatible.
                 codec = 'copy'
-            if vInfo['aCodec'] != 'ac3' and (aCh == None or aCh > 2):
-                codec = 'ac3'
+            elif not isQuery:
+                vInfoQuery = audio_check(inFile, tsn)
+                if vInfoQuery == None:
+                    aKbps = None
+                    aCh = None
+                else:
+                    aKbps = vInfoQuery['aKbps']
+                    aCh = vInfoQuery['aCh']
+            else:
+                codec = 'TBA'
+        if aKbps and int(aKbps) <= config.getMaxAudioBR(tsn):
+            # compatible codec and bitrate, do not reencode audio
+            codec = 'copy'
+        if vInfo['aCodec'] != 'ac3' and (aCh == None or aCh > 2):
+            codec = 'ac3'
     copy_flag = config.get_tsn('copy_ts', tsn)
     copyts = ' -copyts'
     if ((codec == 'copy' and codectype == 'mpeg2video' and not copy_flag) or
@@ -320,31 +318,31 @@ def select_videofps(inFile, tsn):
         fps = '-r ' + video_fps
     return fps
 
-def select_videocodec(inFile, tsn):
+def select_videocodec(inFile, tsn, mime=''):
     vInfo = video_info(inFile)
-    if tivo_compatible_video(vInfo, tsn)[0]:
+    if tivo_compatible_video(vInfo, tsn, mime)[0]:
         codec = 'copy'
+        if (mime == 'video/x-tivo-mpeg-ts' and
+            vInfo.get('vCodec', '') == 'h264'):
+            codec += ' -bsf h264_mp4toannexb'
     else:
         codec = 'mpeg2video'  # default
     return '-vcodec ' + codec
 
-def select_videobr(inFile, tsn):
-    return '-b ' + str(select_videostr(inFile, tsn) / 1000) + 'k'
+def select_videobr(inFile, tsn, mime=''):
+    return '-b ' + str(select_videostr(inFile, tsn, mime) / 1000) + 'k'
 
-def select_videostr(inFile, tsn):
+def select_videostr(inFile, tsn, mime=''):
     vInfo = video_info(inFile)
-    if tivo_compatible_video(vInfo, tsn)[0]:
+    if tivo_compatible_video(vInfo, tsn, mime)[0]:
         video_str = int(vInfo['kbps'])
         if vInfo['aKbps']:
             video_str -= int(vInfo['aKbps'])
         video_str *= 1000
     else:
         video_str = config.strtod(config.getVideoBR(tsn))
-        if config.isHDtivo(tsn):
-            if vInfo['kbps'] != None and config.getVideoPCT(tsn) > 0:
-                video_percent = (int(vInfo['kbps']) * 10 *
-                                 config.getVideoPCT(tsn))
-                video_str = max(video_str, video_percent)
+        if config.isHDtivo(tsn) and vInfo['kbps']:
+            video_str = max(video_str, int(vInfo['kbps']) * 1000)
         video_str = int(min(config.strtod(config.getMaxVideoBR(tsn)) * 0.95,
                             video_str))
     return video_str
@@ -461,14 +459,8 @@ def select_aspect(inFile, tsn = ''):
           vInfo['millisecs'], TIVO_HEIGHT, TIVO_WIDTH))
 
     if config.isHDtivo(tsn) and not optres:
-        if config.getPixelAR(0) or vInfo['par']:
-            if vInfo['par2'] == None:
-                if vInfo['par']:
-                    npar = par2
-                else:
-                    npar = config.getPixelAR(1)
-            else:
-                npar = par2
+        if vInfo['par']:
+            npar = par2
 
             # adjust for pixel aspect ratio, if set
 
@@ -589,6 +581,12 @@ def tivo_compatible_video(vInfo, tsn, mime=''):
 
             break
 
+        if mime == 'video/x-tivo-mpeg-ts':
+            if codec not in ('h264', 'mpeg2video'):
+                message = (False, 'vCodec %s not compatible' % codec)
+
+            break
+
         if codec not in ('mpeg2video', 'mpeg1video'):
             message = (False, 'vCodec %s not compatible' % codec)
             break
@@ -605,11 +603,6 @@ def tivo_compatible_video(vInfo, tsn, mime=''):
             break
 
         if config.isHDtivo(tsn):
-            if vInfo['par2'] != 1.0:
-                if config.getPixelAR(0):
-                    if vInfo['par2'] != None or config.getPixelAR(1) != 1.0:
-                        message = (False, '%s not correct PAR' % vInfo['par2'])
-                        break
             # HD Tivo detected, skipping remaining tests.
             break
 
@@ -666,8 +659,10 @@ def tivo_compatible_audio(vInfo, inFile, tsn, mime=''):
         if inFile[-5:].lower() == '.tivo':
             break
 
-        if mime == 'video/x-tivo-mpeg-ts' and codec not in ('ac3', 'liba52'):
-            message = (False, 'aCodec %s not compatible' % codec)
+        if mime == 'video/x-tivo-mpeg-ts':
+            if codec not in ('ac3', 'liba52', 'mp2', 'aac_latm'):
+                message = (False, 'aCodec %s not compatible' % codec)
+
             break
 
         if codec not in ('ac3', 'liba52', 'mp2'):
@@ -809,19 +804,21 @@ def video_info(inFile, cache=True):
                               stdin=subprocess.PIPE)
 
     # wait configured # of seconds: if ffmpeg is not back give up
-    wait = config.getFFmpegWait()
-    debug('starting ffmpeg, will wait %s seconds for it to complete' % wait)
-    for i in xrange(wait * 20):
-        time.sleep(.05)
-        if not ffmpeg.poll() == None:
-            break
+    limit = config.getFFmpegWait()
+    if limit:
+        for i in xrange(limit * 20):
+            time.sleep(.05)
+            if not ffmpeg.poll() == None:
+                break
 
-    if ffmpeg.poll() == None:
-        kill(ffmpeg)
-        vInfo['Supported'] = False
-        if cache:
-            info_cache[inFile] = (mtime, vInfo)
-        return vInfo
+        if ffmpeg.poll() == None:
+            kill(ffmpeg)
+            vInfo['Supported'] = False
+            if cache:
+                info_cache[inFile] = (mtime, vInfo)
+            return vInfo
+    else:
+        ffmpeg.wait()
 
     err_tmp.seek(0)
     output = err_tmp.read()
