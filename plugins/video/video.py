@@ -228,7 +228,6 @@ class BaseVideo(Plugin):
             handler.send_response(206)
             handler.send_header('Transfer-Encoding', 'chunked')
         handler.send_header('Content-Type', mime)
-        handler.send_header('Connection', 'close')
         handler.end_headers()
 
         logger.info('[%s] Start sending "%s" to %s' %
@@ -454,8 +453,7 @@ class BaseVideo(Plugin):
                 else:
                     video['mime'] = 'video/x-tivo-mpeg'
 
-                video['textSize'] = ( '%.3f GB' %
-                    (float(f.size) / (1024 ** 3)) )
+                video['textSize'] = metadata.human_size(f.size)
 
             videos.append(video)
 

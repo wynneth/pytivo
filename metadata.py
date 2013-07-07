@@ -45,6 +45,10 @@ HUMAN = {'mpaaRating': {1: 'G', 2: 'PG', 3: 'PG-13', 4: 'R', 5: 'X',
 
 BOM = '\xef\xbb\xbf'
 
+GB = 1024 ** 3
+MB = 1024 ** 2
+KB = 1024
+
 tivo_cache = LRUCache(50)
 mp4_cache = LRUCache(50)
 dvrms_cache = LRUCache(50)
@@ -60,6 +64,18 @@ def get_tv(rating):
 
 def get_stars(rating):
     return HUMAN['starRating'].get(rating, '')
+
+def human_size(raw):
+    raw = float(raw)
+    if raw > GB:
+        tsize = '%.2f GB' % (raw / GB)
+    elif raw > MB:
+        tsize = '%.2f MB' % (raw / MB)
+    elif raw > KB:
+        tsize = '%.2f KB' % (raw / KB)
+    else:
+        tsize = '%d Bytes' % raw
+    return tsize
 
 def tag_data(element, tag):
     for name in tag.split('/'):
@@ -163,10 +179,14 @@ def from_moov(full_path):
               'plistlib' in sys.modules):
             items = {'cast': 'vActor', 'directors': 'vDirector',
                      'producers': 'vProducer', 'screenwriters': 'vWriter'}
-            data = plistlib.readPlistFromString(value)
-            for item in items:
-                if item in data:
-                    metadata[items[item]] = [x['name'] for x in data[item]]
+            try:
+                data = plistlib.readPlistFromString(value)
+            except:
+                pass
+            else:
+                for item in items:
+                    if item in data:
+                        metadata[items[item]] = [x['name'] for x in data[item]]
 
     mp4_cache[full_path] = metadata
     return metadata
@@ -238,7 +258,10 @@ def from_eyetv(full_path):
     path = os.path.dirname(unicode(full_path, 'utf-8'))
     eyetvp = [x for x in os.listdir(path) if x.endswith('.eyetvp')][0]
     eyetvp = os.path.join(path, eyetvp)
-    eyetv = plistlib.readPlist(eyetvp)
+    try:
+        eyetv = plistlib.readPlist(eyetvp)
+    except:
+        return metadata
     if 'epg info' in eyetv:
         info = eyetv['epg info']
         for key in keys:

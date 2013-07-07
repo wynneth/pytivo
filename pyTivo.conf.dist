@@ -14,9 +14,9 @@ port=9032
 # FFmpeg is a required tool but downloaded separately.  See pyTivo wiki 
 # for help.
 # Full path to ffmpeg including filename
-# For windows: ffmpeg=c:\Program Files\pyTivo\bin\ffmpeg.exe
+# For windows: ffmpeg=C:\pyTivo\bin\ffmpeg.exe
 # For linux:   ffmpeg=/usr/bin/ffmpeg
-#ffmpeg=c:\Program Files\pyTivo\bin\ffmpeg.exe
+#ffmpeg=C:\pyTivo\bin\ffmpeg.exe
 ffmpeg=/usr/bin/ffmpeg
 
 # Setting this to True will log more ouput for debugging purposes.
@@ -73,11 +73,11 @@ ffmpeg=/usr/bin/ffmpeg
 
 #[_tivo_HD]
 # section for default video options applicable to all HD TiVos
-# see pyTivo Web Configuration for all available settings
+# see pyTivo Settings for all available settings
 
 #[_tivo_SD]
 # section for default video options applicable to all SD TiVos
-# see pyTivo Web Configuration for all available settings
+# see pyTivo Settings for all available settings
 
 [MyMovies]
 # Type can be 'video', 'music', or 'photo'

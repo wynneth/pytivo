@@ -39,8 +39,8 @@ from the queue.</p>"""
 
 UNABLE = """<h3>Unable to Connect to TiVo</h3> <p>pyTivo was unable to 
 connect to the TiVo at %s.</p> <p>This is most likely caused by an 
-incorrect Media Access Key. Please return to the Web Configuration page 
-and double check your <b>tivo_mak</b> setting.</p>"""
+incorrect Media Access Key. Please return to the Settings page and 
+double check your <b>tivo_mak</b> setting.</p>"""
 
 # Preload the templates
 def tmpl(name):
@@ -125,6 +125,7 @@ class ToGo(Plugin):
             ItemStart = tag_data(xmldoc, 'TiVoContainer/ItemStart')
             ItemCount = tag_data(xmldoc, 'TiVoContainer/ItemCount')
             FirstAnchor = tag_data(items[0], 'Links/Content/Url')
+            title = tag_data(xmldoc, 'TiVoContainer/Details/Title')
 
             data = []
             for item in items:
@@ -153,11 +154,11 @@ class ToGo(Plugin):
                         if value:
                             entry[key] = value
 
-                    entry['SourceSize'] = ( '%.3f GB' %
-                        (float(entry['SourceSize']) / (1024 ** 3)) )
+                    rawsize = entry['SourceSize']
+                    entry['SourceSize'] = metadata.human_size(rawsize)
 
                     dur = int(entry['Duration']) / 1000
-                    entry['Duration'] = ( '%02d:%02d:%02d' %
+                    entry['Duration'] = ( '%d:%02d:%02d' %
                         (dur / 3600, (dur % 3600) / 60, dur % 60) )
 
                     entry['CaptureDate'] = time.strftime('%b %d, %Y',
@@ -179,6 +180,7 @@ class ToGo(Plugin):
             ItemStart = 0
             ItemCount = 0
             FirstAnchor = ''
+            title = ''
 
         if useragent.lower().find('mobile') > 0:
             t = Template(CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
@@ -201,6 +203,7 @@ class ToGo(Plugin):
         t.ItemCount = int(ItemCount)
         t.FirstAnchor = quote(FirstAnchor)
         t.shows_per_page = shows_per_page
+        t.title = title
         handler.send_html(str(t), refresh='300')
 
     def get_tivo_file(self, tivoIP, url, mak, togo_path):

@@ -7,21 +7,17 @@
 </head>
 <body>
 <form action="/TiVoConnect" method="POST">
-<p id="titlep"><span id="title">pyTivo - ToGo - $escape($tname)</span></p>
-<p><a href="/">Home</a></p>
-<script language="JavaScript">
-<!--
-function toggle(source) {
-	var checkboxes = document.getElementsByName('Url');
-	for (var i = 0; i < checkboxes.length; i++) {
-		if (typeof(checkboxes[i].checked) != "undefined") {
-			checkboxes[i].checked = source.checked;
-			}
-	}
-}
--->
-</script>
-<table id="main" border="0" cellpadding="0" cellspacing="4">
+<p id="titlep"><span id="title">
+<a href="/">pyTivo</a> /
+  #if $folder != ''
+<a href="/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;TiVo=$tivoIP">
+  #end if
+Pull from $escape($tname)
+  #if $folder != ''
+</a> / $escape($title)
+  #end if
+</span></p>
+<table id="main">
   #if $ItemStart > 0
 	<tr><td colspan="5">
 	#set $Offset = -($ItemStart + 1)
@@ -31,21 +27,6 @@ function toggle(source) {
 	<a href="/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;TiVo=$tivoIP&amp;AnchorItem=$FirstAnchor&amp;AnchorOffset=$Offset&amp;Folder=$folder">Previous Page</a>
 	</td></tr>
   #end if
-  #if $folder != ''
-	## We are in a subfolder, offer the option to return to NPL
-	<tr>
-		<td><img src="/back.png" alt=""></td>
-		<td colspan=4><a href="/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;TiVo=$tivoIP">Back to Now Playing List</a></td>
-	</tr>
-  #end if
-  ## Header Row
-	<tr class="header">
-		<td><input type="checkbox" name="selectAll" onClick="toggle(this)" Title="Select All" /></td>
-		<td></td>
-		<td>Title</td>
-		<td>Size</td>
-		<td>Capture Date</td>
-	</tr>
   #set $i = 0
   ## i variable is used to alternate colors of row
   ## loop through passed data printing row for each show or folder
@@ -58,8 +39,8 @@ function toggle(source) {
 		<td></td>
 		<td><img src="/folder.png" alt=""></td>
 		<td class="progmain"><a href='/TiVoConnect?Command=NPL&amp;Container=$quote($container)&amp;Folder=$(row["UniqueId"])&amp;TiVo=$tivoIP'>$row['Title'] </a></td>
-		<td class="unbreak">$(row["TotalItems"]) Items</td>
-		<td class="unbreak">$row["LastChangeDate"]</td>
+		<td class="progsize">$(row["TotalItems"]) Items</td>
+		<td class="progdate">$row["LastChangeDate"]</td>
 	  #else
 	    ## This is a show
 		<td>
@@ -125,10 +106,10 @@ function toggle(source) {
 				#end if
 			#end if
 		</td>
-		<td class="unbreak">$row['SourceSize'] <br>
+		<td class="progsize">$row['SourceSize'] <br>
 		$row['Duration']
 		</td>
-		<td class="unbreak">$row['CaptureDate']</td>
+		<td class="progdate">$row['CaptureDate']</td>
 	  #end if
 	  </tr>
   #end for

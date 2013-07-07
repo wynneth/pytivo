@@ -1,12 +1,15 @@
 import BaseHTTPServer
 import SocketServer
 import cgi
+import gzip
 import logging
 import mimetypes
 import os
 import shutil
 import socket
 import time
+from cStringIO import StringIO
+from email.utils import formatdate
 from urllib import unquote_plus, quote
 from xml.sax.saxutils import escape
 
@@ -38,7 +41,9 @@ VIDEO_FORMATS_TS = """<?xml version="1.0" encoding="utf-8"?>
 
 BASE_HTML = """<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
 "http://www.w3.org/TR/html4/strict.dtd">
-<html> <head><title>pyTivo</title></head> <body> %s </body> </html>"""
+<html> <head><title>pyTivo</title>
+<link rel="stylesheet" type="text/css" href="/main.css">
+</head> <body> %s </body> </html>"""
 
 RELOAD = '<p>The <a href="%s">page</a> will reload in %d seconds.</p>'
 UNSUP = '<h3>Unsupported Command</h3> <p>Query:</p> <ul>%s</ul>'
@@ -80,6 +85,7 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def __init__(self, request, client_address, server):
         self.wbufsize = 0x10000
         self.server_version = 'pyTivo/1.0'
+        self.protocol_version = 'HTTP/1.1'
         self.sys_version = ''
         BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, request,
             client_address, server)
@@ -193,12 +199,39 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             elif command in ('FlushServer', 'ResetServer'):
                 # Does nothing -- included for completeness
                 self.send_response(200)
+                self.send_header('Content-Length', '0')
                 self.end_headers()
+                self.wfile.flush()
                 return
 
         # If we made it here it means we couldn't match the request to
         # anything.
         self.unsupported(query)
+
+    def send_content_file(self, path):
+        lmdate = os.path.getmtime(path)
+        try:
+            handle = open(path, 'rb')
+        except:
+            self.send_error(404)
+            return
+
+        # Send the header
+        mime = mimetypes.guess_type(path)[0]
+        self.send_response(200)
+        if mime:
+            self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', os.path.getsize(path))
+        self.send_header('Last-Modified', formatdate(lmdate))
+        self.end_headers()
+
+        # Send the body of the file
+        try:
+            shutil.copyfileobj(handle, self.wfile)
+        except:
+            pass
+        handle.close()
+        self.wfile.flush()
 
     def handle_file(self, query, splitpath):
         if '..' not in splitpath:    # Protect against path exploits
@@ -218,26 +251,7 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             path = os.path.join(base, 'content', splitpath[-1])
 
             if os.path.isfile(path):
-                try:
-                    handle = open(path, 'rb')
-                except:
-                    self.send_error(404)
-                    return
-
-                # Send the header
-                mime = mimetypes.guess_type(path)[0]
-                self.send_response(200)
-                if mime:
-                    self.send_header('Content-type', mime)
-                self.send_header('Content-length', os.path.getsize(path))
-                self.end_headers()
-
-                # Send the body of the file
-                try:
-                    shutil.copyfileobj(handle, self.wfile)
-                except:
-                    pass
-                handle.close()
+                self.send_content_file(path)
                 return
 
         ## Give up
@@ -261,15 +275,24 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                                 self.log_date_time_string(), format%args))
 
     def send_fixed(self, page, mime, code=200, refresh=''):
+        squeeze = (len(page) > 256 and mime.startswith('text') and
+            'gzip' in self.headers.getheader('Accept-Encoding', ''))
+        if squeeze:
+            out = StringIO()
+            gzip.GzipFile(mode='wb', fileobj=out).write(page)
+            page = out.getvalue()
+            out.close()
         self.send_response(code)
         self.send_header('Content-Type', mime)
         self.send_header('Content-Length', len(page))
-        self.send_header('Connection', 'close')
+        if squeeze:
+            self.send_header('Content-Encoding', 'gzip')
         self.send_header('Expires', '0')
         if refresh:
             self.send_header('Refresh', refresh)
         self.end_headers()
         self.wfile.write(page)
+        self.wfile.flush()
 
     def send_xml(self, page):
         self.send_fixed(page, 'text/xml')
@@ -293,6 +316,10 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         t = Template(file=os.path.join(SCRIPTDIR, 'templates',
                                        'root_container.tmpl'),
                      filter=EncodeUnicode)
+        if self.server.beacon.bd:
+            t.renamed = self.server.beacon.bd.renamed
+        else:
+            t.renamed = {}
         t.containers = tsncontainers
         t.hostname = socket.gethostname()
         t.escape = escape
@@ -327,7 +354,7 @@ class TivoHTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             if plugin_type == 'settings':
                 t.admin += ('<a href="/TiVoConnect?Command=Settings&amp;' +
                             'Container=' + quote(section) +
-                            '">Web Configuration</a><br>')
+                            '">Settings</a><br>')
             elif plugin_type == 'togo' and t.togo:
                 for tsn in config.tivos:
                     if tsn:

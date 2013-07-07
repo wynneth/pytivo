@@ -6,42 +6,26 @@
 <link rel="stylesheet" type="text/css" href="/main.css">
 </head>
 <body>
+#set $folders = $name.split('/')
 <form action="/TiVoConnect" method="POST">
-<p id="titlep"><span id="title">pyTivo - Push - $escape($name)</span></p>
-<p><a href="/">Home</a></p>
-<script language="JavaScript">
-<!--
-function toggle(source) {
-	var checkboxes = document.getElementsByName('File');
-	for (var i = 0; i < checkboxes.length; i++) {
-		if (typeof(checkboxes[i].checked) != "undefined") {
-			checkboxes[i].checked = source.checked;
-			}
-	}
-}
--->
-</script>
-<table id="main" border="0" cellpadding="0" cellspacing="4">
-  ## Header Row
-	<tr class="header">
-		<td><input type="checkbox" name="selectAll" onClick="toggle(this)" Title="Select All" /></td>
-		<td></td>
-		<td><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)&SortOrder=Normal&amp;Format=text/html'>Title</a></td>
-		<td>Size</td>
-		<td><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)&SortOrder=!CaptureDate&amp;Format=text/html'>Capture Date</a></td>
-	</tr>
-    #set $parent = ''
-    #set $folders = $name.split("/")
-    #set $current_folder = $folders.pop()
-    #set $parent = '/'.join($folders)
-    #if $parent != ''
-    <tr id="parentLinkRow">
-        <td><img src="/back.png" alt="" /></td>
-        <td width="100%" colspan="4">
-        <a id="parentLink" href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($parent)&amp;Format=text/html'>Up to Parent Folder</a>
-        </td>
-    </tr>
-    #end if
+<p id="titlep"><span id="title">
+<a href="/">pyTivo</a> /
+#if len($folders) > 1
+<a href="/TiVoConnect?Command=QueryContainer&amp;Container=$quote($folders[0])&amp;Format=text/html">
+#end if
+Push from $escape($folders[0])
+#if len($folders) > 1
+</a>
+  #if len($folders) > 2
+    #for $pos, $n in enumerate($folders[1:-1])
+      #set $ppath = '/'.join($folders[:$pos + 2])
+/ <a href="/TiVoConnect?Command=QueryContainer&amp;Container=$quote($ppath)&amp;Format=text/html">$n</a>
+    #end for
+  #end if
+/ $escape($folders[-1])
+#end if
+</span></p>
+<table id="main">
   #set $i = 0
   ## i variable is used to alternate colors of row
   ## loop through passed data printing row for each show or folder
@@ -52,10 +36,10 @@ function toggle(source) {
 	  #if $video.is_dir
 	    ## This is a folder
 		<td></td>
-        <td><img src="/folder.png" alt=""></td>
-		<td class="progmain"><a href='/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)/$quote($video.name)&amp;Format=text/html'>$video.title </a></td>
-		<td class="unbreak">$video.total_items Items</td>
-		<td class="unbreak">$video.textDate</td>
+		<td><img src="/folder.png" alt=""></td>
+		<td class="progmain"><a href="/TiVoConnect?Command=QueryContainer&amp;Container=$quote($name)/$quote($video.name)&amp;Format=text/html">$video.title</a></td>
+		<td class="progsize">$video.total_items Items</td>
+		<td class="progdate">$video.textDate</td>
 	  #else
 	    ## This is a show
 		<td>
@@ -77,9 +61,8 @@ function toggle(source) {
 			#end if
 			</span>
 		</td>
-		<td class="unbreak">$video.textSize
-		</td>
-		<td class="unbreak">$video.textDate</td>
+		<td class="progsize">$video.textSize</td>
+		<td class="progdate">$video.textDate</td>
 	  #end if
 	  </tr>
   #end for
