@@ -125,6 +125,7 @@ Available In: Server
 
 debug
 
+Mode: checkbox
 Default Setting: False
 Valid Entries: True/False
 Required: No
@@ -134,6 +135,7 @@ Available In: Server
 
 type
 
+Mode: select
 Default Setting: None
 Valid Entries: video, music, photo, or any other valid plugin name.
 Required: Yes
@@ -155,6 +157,7 @@ Available In: Shares
 
 force_alpha
 
+Mode: checkbox
 Default Setting: False
 Valid Entries: True/False
 Required: No
@@ -168,8 +171,24 @@ alpha-sorted, you need this option.
 Example Settings: True/False
 Available In: Shares
 
+force_ffmpeg
+
+Mode: checkbox
+Default Setting: False
+Valid Entries: True/False
+Required: No
+Description: Only meaningful in shares of type "music". When false, 
+pyTivo will pass through TiVo-compatible MP3 files as-is (unless you 
+seek within them). When true, even these files will be processed by 
+FFmpeg, in order to strip out album artwork that the TiVo would 
+otherwise try to play as sound, producing a squeal. This is done with 
+the "copy" codec, so it's low-overhead.
+Example Settings: True/False
+Available In: Shares
+
 optres
 
+Mode: checkbox
 Default Setting: False
 Valid Entries: True/False
 Required: No
@@ -363,7 +382,7 @@ unless you wish to disable it. pyTivo defaults to True except when
 pyTivo uses acodec copy, in which case copyts is not needed, and a
 conflict could also occur if the source file has really corrupt
 sections.
-Example Settings: True, False
+Example Settings: True/False
 Available In: Tivos, HD_tivos, SD_tivos
 
 ffmpeg_pram
@@ -490,8 +509,10 @@ Available In: Server
 
 zeroconf
 
+Mode: select
+Options: Auto/On/Off
 Default Setting: Auto
-Valid Entries: True/False/Auto
+Valid Entries: On/Off/Auto
 Required: No
 Description: Controls whether or not new-style, zeroconf-based beacons 
 are used. The default is to use them, unless there's a "_tivo_" section 
@@ -499,11 +520,12 @@ with "shares" defined. The zeroconf beacons bypass the usual mechanism
 whereby only the allowed shares are announced to specific TiVos; the 
 contents of the shares will still not appear on unauthorized TiVos, but 
 the names will.
-Example Settings: True/False/Auto
+Example Settings: On/Off/Auto
 Available In: Server
 
 nosettings
 
+Mode: checkbox
 Default Setting: False
 Valid Entries: True/False
 Required: No

@@ -1,8 +1,8 @@
 import logging
 import re
+import socket
 import struct
 import time
-from socket import *
 from threading import Timer
 from urllib import quote
 
@@ -34,11 +34,14 @@ class ZCBroadcast:
         self.rz = Zeroconf.Zeroconf()
         self.renamed = {}
         old_titles = self.scan()
-        address = inet_aton(config.get_ip())
+        address = socket.inet_aton(config.get_ip())
         port = int(config.getPort())
         logger.info('Announcing shares...')
         for section, settings in config.getShares():
-            ct = GetPlugin(settings['type']).CONTENT_TYPE
+            try:
+                ct = GetPlugin(settings['type']).CONTENT_TYPE
+            except:
+                continue
             if ct.startswith('x-container/'):
                 if 'video' in ct:
                     platform = PLATFORM_VIDEO
@@ -79,7 +82,7 @@ class ZCBroadcast:
             info = self.rz.getServiceInfo(VIDS, name + '.' + VIDS)
             if info and 'TSN' in info.properties:
                 tsn = info.properties['TSN']
-                address = inet_ntoa(info.getAddress())
+                address = socket.inet_ntoa(info.getAddress())
                 config.tivos[tsn] = address
                 self.logger.info(name)
                 config.tivo_names[tsn] = name
@@ -94,13 +97,16 @@ class ZCBroadcast:
 
 class Beacon:
     def __init__(self):
-        self.UDPSock = socket(AF_INET, SOCK_DGRAM)
-        self.UDPSock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+        self.UDPSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.UDPSock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.services = []
 
         self.platform = PLATFORM_VIDEO
         for section, settings in config.getShares():
-            ct = GetPlugin(settings['type']).CONTENT_TYPE
+            try:
+                ct = GetPlugin(settings['type']).CONTENT_TYPE
+            except:
+                continue
             if ct in ('x-container/tivo-music', 'x-container/tivo-photos'):
                 self.platform = PLATFORM_MAIN
                 break
@@ -125,8 +131,8 @@ class Beacon:
     def format_beacon(self, conntype, services=True):
         beacon = ['tivoconnect=1',
                   'method=%s' % conntype,
-                  'identity=%s' % config.getGUID(),
-                  'machine=%s' % gethostname(),
+                  'identity={%s}' % config.getGUID(),
+                  'machine=%s' % socket.gethostname(),
                   'platform=%s' % self.platform]
 
         if services:
@@ -182,7 +188,7 @@ class Beacon:
         import thread
 
         def server():
-            TCPSock = socket(AF_INET, SOCK_STREAM)
+            TCPSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             TCPSock.bind(('', 2190))
             TCPSock.listen(5)
 
@@ -206,7 +212,7 @@ class Beacon:
         machine_name = re.compile('machine=(.*)\n').search
 
         try:
-            tsock = socket()
+            tsock = socket.socket()
             tsock.connect((address, 2190))
             self.send_packet(tsock, our_beacon)
             tivo_beacon = self.recv_packet(tsock)

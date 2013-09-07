@@ -84,9 +84,18 @@ class ToGo(Plugin):
                 raise
 
     def NPL(self, handler, query):
+
+        def getint(thing):
+            try:
+                result = int(thing)
+            except:
+                result = 0
+            return result
+
         global basic_meta
         shows_per_page = 50 # Change this to alter the number of shows returned
         folder = ''
+        FirstAnchor = ''
         has_tivodecode = bool(config.get_bin('tivodecode'))
         useragent = handler.headers.getheader('User-Agent', '')
 
@@ -124,8 +133,9 @@ class ToGo(Plugin):
             TotalItems = tag_data(xmldoc, 'TiVoContainer/Details/TotalItems')
             ItemStart = tag_data(xmldoc, 'TiVoContainer/ItemStart')
             ItemCount = tag_data(xmldoc, 'TiVoContainer/ItemCount')
-            FirstAnchor = tag_data(items[0], 'Links/Content/Url')
             title = tag_data(xmldoc, 'TiVoContainer/Details/Title')
+            if items:
+                FirstAnchor = tag_data(items[0], 'Links/Content/Url')
 
             data = []
             for item in items:
@@ -157,7 +167,7 @@ class ToGo(Plugin):
                     rawsize = entry['SourceSize']
                     entry['SourceSize'] = metadata.human_size(rawsize)
 
-                    dur = int(entry['Duration']) / 1000
+                    dur = getint(entry['Duration']) / 1000
                     entry['Duration'] = ( '%d:%02d:%02d' %
                         (dur / 3600, (dur % 3600) / 60, dur % 60) )
 
@@ -179,7 +189,6 @@ class ToGo(Plugin):
             TotalItems = 0
             ItemStart = 0
             ItemCount = 0
-            FirstAnchor = ''
             title = ''
 
         if useragent.lower().find('mobile') > 0:
@@ -198,9 +207,9 @@ class ToGo(Plugin):
         t.container = handler.cname
         t.data = data
         t.len = len
-        t.TotalItems = int(TotalItems)
-        t.ItemStart = int(ItemStart)
-        t.ItemCount = int(ItemCount)
+        t.TotalItems = getint(TotalItems)
+        t.ItemStart = getint(ItemStart)
+        t.ItemCount = getint(ItemCount)
         t.FirstAnchor = quote(FirstAnchor)
         t.shows_per_page = shows_per_page
         t.title = title

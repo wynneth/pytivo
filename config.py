@@ -4,11 +4,14 @@ import logging
 import logging.config
 import os
 import re
-import random
 import socket
-import string
 import sys
+import uuid
 from ConfigParser import NoOptionError
+
+class Bdict(dict):
+    def getboolean(self, x):
+        return self.get(x, 'False').lower() in ('1', 'yes', 'true', 'on')
 
 def init(argv):
     global tivos
@@ -18,7 +21,7 @@ def init(argv):
 
     tivos = {}
     tivo_names = {}
-    guid = ''.join([random.choice(string.ascii_letters) for i in range(10)])
+    guid = uuid.uuid4()
 
     p = os.path.dirname(__file__)
     config_files = ['/etc/pyTivo.conf', os.path.join(p, 'pyTivo.conf')]
@@ -82,7 +85,7 @@ def get_server(name, default=None):
         return default
 
 def getGUID():
-    return guid
+    return str(guid)
 
 def get_ip(tsn=None):
     dest_ip = tivos.get(tsn, '4.2.2.1')
@@ -161,12 +164,10 @@ def isTsnInConfig(tsn):
     return ('_tivo_' + tsn) in config.sections()
 
 def getShares(tsn=''):
-    shares = [(section, dict(config.items(section)))
+    shares = [(section, Bdict(config.items(section)))
               for section in config.sections()
-              if not (section.startswith('_tivo_')
-                      or section.startswith('logger_')
-                      or section.startswith('handler_')
-                      or section.startswith('formatter_')
+              if not (section.startswith(('_tivo_', 'logger_', 'handler_',
+                                          'formatter_'))
                       or section in ('Server', 'loggers', 'handlers',
                                      'formatters')
               )
